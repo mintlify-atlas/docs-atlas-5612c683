@@ -1,0 +1,81 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "Watchdog",
+  "projectDescription": "An event-driven HTTP uptime monitoring service written in Go that periodically checks URLs and sends notifications on status changes",
+  "theme": "aspen",
+  "primaryColor": "#E07A5F",
+  "lightColor": "#F2CC8F",
+  "darkColor": "#3D405B",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "architecture/overview",
+              "architecture/components",
+              "architecture/event-flow"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/environment",
+              "configuration/database",
+              "configuration/email"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/monitoring-urls",
+              "guides/running-service",
+              "guides/troubleshooting"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "CLI Reference",
+        "groups": [
+          {
+            "group": "Commands",
+            "pages": [
+              "cli/overview",
+              "cli/guard",
+              "cli/add",
+              "cli/remove",
+              "cli/list",
+              "cli/analysis"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Event-driven architecture with pub/sub event bus",
+    "Periodic HTTP health checks with configurable intervals",
+    "Time-series metrics storage in TimescaleDB",
+    "Email notifications on status changes",
+    "CLI for managing monitored URLs",
+    "Worker pool pattern for concurrent monitoring",
+    "Supervisor-based decision logic with debouncing"
+  ],
+  "publicApiSurface": [
+    "guard - Start the monitoring service",
+    "add - Add a new URL to monitor",
+    "remove - Remove a monitored URL",
+    "list - List all monitored URLs",
+    "analysis - Run analysis for a URL"
+  ]
+}
