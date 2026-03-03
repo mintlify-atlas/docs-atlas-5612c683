@@ -1,0 +1,289 @@
+---
+title: analysis command
+description: View detailed uptime statistics and incident history for a monitored URL
+---
+
+## Overview
+
+The `analysis` command provides comprehensive uptime statistics and incident reports for a specific monitored URL. It shows current status, recent downtime, last check time, and incident counts over various time periods.
+
+## Usage
+
+```bash
+watchdog analysis <id>
+```
+
+## Aliases
+
+- `an`
+
+## Description
+
+The `analysis` command generates a detailed report for a monitored URL, including:
+
+- Current health status (healthy, unhealthy, or pending)
+- How long the URL has been up or down
+- Time since last health check
+- Number of incidents in the last 24 hours, 7 days, 30 days, and 365 days
+
+## Arguments
+
+<ParamField path="id" type="integer" required>
+  The unique identifier of the URL to analyze. Find this ID using the `list` command.
+</ParamField>
+
+## Flags
+
+This command has no flags.
+
+## Examples
+
+### View analysis for a URL
+
+```bash
+watchdog analysis 1
+```
+
+Expected output for a healthy URL:
+
+```
+Connected to PostgreSQL database!
+Running analysis...
+URL: https://example.com
+HTTP Method: get
+Monitoring Frequency: five_minutes
+Site Status: healthy
+Currently Up for: 2h15m30s
+Last Checked: 3m45s ago
+Number of Incidents in the last 24 hours: 0
+Number of Incidents in the last 7 days: 2
+Number of Incidents in the last 30 days: 5
+Number of Incidents in the last 365 days: 18
+```
+
+Expected output for an unhealthy URL:
+
+```
+Connected to PostgreSQL database!
+Running analysis...
+URL: https://critical-service.com
+HTTP Method: post
+Monitoring Frequency: ten_seconds
+Site Status: unhealthy
+Currently Down for: 15m22s
+Last Checked: 8s ago
+Number of Incidents in the last 24 hours: 3
+Number of Incidents in the last 7 days: 3
+Number of Incidents in the last 30 days: 12
+Number of Incidents in the last 365 days: 45
+```
+
+Expected output for a pending URL (not yet checked):
+
+```
+Connected to PostgreSQL database!
+Running analysis...
+URL: https://new-service.com
+HTTP Method: get
+Monitoring Frequency: one_minute
+Site Status: pending
+No check has been performed yet.
+Number of Incidents in the last 24 hours: 0
+Number of Incidents in the last 7 days: 0
+Number of Incidents in the last 30 days: 0
+Number of Incidents in the last 365 days: 0
+```
+
+### Using the short alias
+
+```bash
+watchdog an 1
+```
+
+### Analyze multiple URLs
+
+Check several URLs in sequence:
+
+```bash
+watchdog analysis 1
+watchdog analysis 2
+watchdog analysis 3
+```
+
+## Output fields
+
+<ResponseField name="URL" type="string">
+  The full URL being monitored
+</ResponseField>
+
+<ResponseField name="HTTP Method" type="string">
+  The HTTP method used for health checks (get, post, put, patch, delete)
+</ResponseField>
+
+<ResponseField name="Monitoring Frequency" type="string">
+  How often the URL is checked (e.g., five_minutes, one_hour)
+</ResponseField>
+
+<ResponseField name="Site Status" type="string">
+  Current health status:
+  - `healthy` - URL is reachable
+  - `unhealthy` - URL is unreachable
+  - `pending` - Not yet checked
+</ResponseField>
+
+<ResponseField name="Currently Up for / Currently Down for" type="duration">
+  How long the URL has been in its current state. Shows "Up for" when healthy, "Down for" when unhealthy.
+</ResponseField>
+
+<ResponseField name="Last Checked" type="duration">
+  Time elapsed since the last health check (e.g., "3m45s ago")
+</ResponseField>
+
+<ResponseField name="Incident counts" type="integer">
+  Number of incidents over four time periods:
+  - Last 24 hours
+  - Last 7 days
+  - Last 30 days
+  - Last 365 days (1 year)
+</ResponseField>
+
+## Understanding uptime duration
+
+The "Currently Up for" or "Currently Down for" duration is calculated as:
+
+- If the URL is **healthy**: Time since the last transition from unhealthy to healthy
+- If the URL is **unhealthy**: Time since the last transition from healthy to unhealthy
+- If no status changes exist: Time since the URL was first added to monitoring
+
+<Note>
+For newly added URLs with status "pending", no uptime/downtime duration is shown until the first health check completes.
+</Note>
+
+## Understanding incidents
+
+An incident is counted when a URL transitions from healthy to unhealthy. The incident counts help you:
+
+- Identify unreliable services
+- Track improvements or degradations over time
+- Plan maintenance windows
+- Set realistic SLA expectations
+
+## Error handling
+
+### Missing ID argument
+
+```bash
+watchdog analysis
+```
+
+The command will process but treat the ID as 0, which typically won't find a URL.
+
+### URL not found
+
+```bash
+watchdog analysis 999
+```
+
+Error output:
+```
+Running analysis...
+Unable to find site: no rows in result set
+```
+
+### Database connection failed
+
+If PostgreSQL is not accessible:
+
+```
+pgxpool connection failed: connection refused
+```
+
+Solution: Verify PostgreSQL is running and credentials in `.env` are correct.
+
+## Common use cases
+
+### Pre-removal analysis
+
+Before removing a URL, review its history:
+
+```bash
+watchdog analysis 42
+watchdog remove 42
+```
+
+### Incident investigation
+
+When you receive an alert, check detailed statistics:
+
+```bash
+watchdog list --status=unhealthy
+watchdog analysis 15
+```
+
+### Reliability reporting
+
+Generate uptime reports for stakeholders:
+
+```bash
+watchdog analysis 1 > url-1-report.txt
+watchdog analysis 2 > url-2-report.txt
+```
+
+### Frequency optimization
+
+Check if a URL needs more or less frequent monitoring:
+
+```bash
+watchdog analysis 10
+# If incidents are rare, consider reducing frequency
+# If incidents are frequent, consider increasing frequency
+```
+
+## Technical details
+
+- The command queries the database for historical incident data
+- Duration calculations use the current system time
+- Incident counts use the incident repository with day-based filters
+- If no incidents exist for a period, the count is 0 (not an error)
+- Last check time is calculated from the most recent status entry
+
+## Interpreting the results
+
+### Healthy service example
+
+```
+Site Status: healthy
+Currently Up for: 48h12m
+Number of Incidents in the last 24 hours: 0
+Number of Incidents in the last 7 days: 1
+```
+
+**Interpretation**: The service has been continuously up for 2 days and had only one brief incident in the past week. This indicates good reliability.
+
+### Troubled service example
+
+```
+Site Status: unhealthy
+Currently Down for: 2h30m
+Number of Incidents in the last 24 hours: 5
+Number of Incidents in the last 7 days: 12
+```
+
+**Interpretation**: The service is currently down and has been unstable, with multiple incidents. This requires immediate attention.
+
+### New service example
+
+```
+Site Status: pending
+No check has been performed yet.
+Number of Incidents in the last 24 hours: 0
+```
+
+**Interpretation**: This is a newly added URL. Ensure the `guard` command is running to begin monitoring.
+
+## See also
+
+- [list command](/cli/list) - Find URL IDs to analyze
+- [guard command](/cli/guard) - Ensure monitoring is active
+- [add command](/cli/add) - Add new URLs to monitor
+- [remove command](/cli/remove) - Remove URLs from monitoring

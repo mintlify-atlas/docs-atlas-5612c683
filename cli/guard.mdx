@@ -1,0 +1,125 @@
+---
+title: guard command
+description: Start the Watchdog monitoring service to continuously monitor configured URLs
+---
+
+## Overview
+
+The `guard` command starts the Watchdog monitoring service. It initializes connections to the database and Redis, then begins monitoring all configured URLs at their specified frequencies.
+
+## Usage
+
+```bash
+watchdog guard
+```
+
+## Aliases
+
+- `g`
+
+## Description
+
+When you run the `guard` command, Watchdog:
+
+1. Loads environment variables from `.env`
+2. Connects to PostgreSQL database
+3. Connects to Redis for caching and job queuing
+4. Initializes the orchestrator and supervisor
+5. Sets up monitoring intervals for all frequency tiers
+6. Starts monitoring all configured URLs
+
+The service runs continuously until stopped (Ctrl+C).
+
+## Arguments
+
+This command takes no arguments.
+
+## Flags
+
+This command has no flags.
+
+## Monitoring frequencies
+
+The guard command automatically sets up monitoring for the following frequency intervals:
+
+- 10 seconds
+- 30 seconds
+- 1 minute
+- 5 minutes
+- 30 minutes
+- 1 hour
+- 12 hours
+- 24 hours
+
+URLs are checked according to their configured frequency.
+
+## Examples
+
+### Start the monitoring service
+
+```bash
+watchdog guard
+```
+
+Expected output:
+
+```
+Connected to PostgreSQL database!
+Watchdog is running
+```
+
+### Using the short alias
+
+```bash
+watchdog g
+```
+
+## Prerequisites
+
+Before running the guard command, ensure:
+
+1. You have a valid `.env` file with required configuration:
+   - `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`
+   - `REDIS_HOST`, `REDIS_DB`
+   - Email configuration for alerts
+
+2. PostgreSQL is running and accessible
+3. Redis is running and accessible
+4. You have at least one URL configured (use the `add` command)
+
+## Error handling
+
+<Warning>
+If the database or Redis connection fails, the guard command will panic and exit. Ensure both services are running before starting Watchdog.
+</Warning>
+
+### Common errors
+
+**Database connection failed:**
+```
+pgxpool connection failed: connection refused
+```
+
+Solution: Verify PostgreSQL is running and credentials in `.env` are correct.
+
+**Redis connection failed:**
+```
+Redis connection failed
+```
+
+Solution: Verify Redis is running and `REDIS_HOST` in `.env` is correct.
+
+## Technical details
+
+- Connection pool size for Redis: 10
+- Minimum idle connections: 5
+- Maximum retries: 3
+- Read timeout: 30 seconds
+- Write timeout: 30 seconds
+- Dial timeout: 10 seconds
+
+## See also
+
+- [add command](/cli/add) - Add URLs to monitor
+- [list command](/cli/list) - View all monitored URLs
+- [analysis command](/cli/analysis) - View monitoring statistics

@@ -1,0 +1,726 @@
+---
+title: Troubleshooting
+description: Common issues and solutions when running Watchdog
+---
+
+This guide covers common issues you might encounter when running Watchdog and how to resolve them.
+
+## Database connection issues
+
+### PostgreSQL connection failed
+
+**Error message:**
+```
+panic: pgxpool connection failed: failed to connect to `host=localhost user=tsdbadmin database=tsdb`: ...
+```
+
+**Causes and solutions:**
+
+<Accordion title="Database is not running">
+  Verify PostgreSQL is running:
+
+  ```bash
+  # Check if PostgreSQL is running
+  sudo systemctl status postgresql
+
+  # Start PostgreSQL if needed
+  sudo systemctl start postgresql
+
+  # For Docker
+  docker ps | grep postgres
+  ```
+</Accordion>
+
+<Accordion title="Incorrect database credentials">
+  Verify your `.env` file has the correct credentials:
+
+  ```bash
+  DB_USER=tsdbadmin
+  DB_PASSWORD=your_password
+  DB_HOST=localhost
+  DB_PORT=5432
+  DB_DATABASE=tsdb
+  ```
+
+  Test the connection manually:
+  ```bash
+  psql -h localhost -U tsdbadmin -d tsdb
+  ```
+</Accordion>
+
+<Accordion title="Database does not exist">
+  Create the database:
+
+  ```sql
+  -- Connect as superuser
+  psql -U postgres
+
+  -- Create database
+  CREATE DATABASE tsdb;
+
+  -- Grant privileges
+  GRANT ALL PRIVILEGES ON DATABASE tsdb TO tsdbadmin;
+  ```
+</Accordion>
+
+<Accordion title="Network/firewall issues">
+  Check if PostgreSQL is listening on the correct port:
+
+  ```bash
+  sudo netstat -tlnp | grep 5432
+  ```
+
+  Verify firewall allows connections:
+  ```bash
+  sudo ufw status
+  sudo ufw allow 5432/tcp
+  ```
+
+  For remote databases, ensure `pg_hba.conf` allows connections from your IP.
+</Accordion>
+
+### Database ping failed
+
+**Error message:**
+```
+pgxpool connection failed: context deadline exceeded
+```
+
+**Solution:**
+
+Increase the connection timeout or check network connectivity:
+
+```bash
+# Test network connectivity
+ping <DB_HOST>
+
+# Test PostgreSQL port
+telnet <DB_HOST> 5432
+```
+
+<Note>
+The service calls `pool.Ping(ctx)` on startup. If this fails, verify the database is accepting connections and not under heavy load.
+</Note>
+
+## Redis connection issues
+
+### Redis connection failed
+
+**Error message:**
+```
+Redis connection failed
+panic: Redis connection failed
+```
+
+**Causes and solutions:**
+
+<Accordion title="Redis is not running">
+  Verify Redis is running:
+
+  ```bash
+  # Check if Redis is running
+  sudo systemctl status redis
+
+  # Start Redis if needed
+  sudo systemctl start redis
+
+  # For Docker
+  docker ps | grep redis
+  ```
+
+  Test Redis connection:
+  ```bash
+  redis-cli ping
+  # Expected output: PONG
+  ```
+</Accordion>
+
+<Accordion title="Incorrect Redis configuration">
+  Verify your `.env` file:
+
+  ```bash
+  REDIS_HOST=127.0.0.1:6379
+  REDIS_PASS=''
+  REDIS_DB=2
+  ```
+
+  Test connection with redis-cli:
+  ```bash
+  redis-cli -h 127.0.0.1 -p 6379
+  127.0.0.1:6379> SELECT 2
+  OK
+  ```
+</Accordion>
+
+<Accordion title="Redis requires password">
+  If Redis is password-protected, set `REDIS_PASS` in `.env`:
+
+  ```bash
+  REDIS_PASS='your_redis_password'
+  ```
+
+  Test with password:
+  ```bash
+  redis-cli -h 127.0.0.1 -p 6379 -a your_redis_password
+  ```
+</Accordion>
+
+<Accordion title="Connection timeout">
+  The service uses a 10-second dial timeout. If Redis is slow to respond, check:
+
+  ```bash
+  # Check Redis performance
+  redis-cli --latency
+
+  # Check Redis memory usage
+  redis-cli INFO memory
+
+  # Check number of connected clients
+  redis-cli INFO clients
+  ```
+
+  Consider increasing pool size in `/home/daytona/workspace/source/cmd/commands/guard.go:46` if you have many concurrent operations.
+</Accordion>
+
+## Migration errors
+
+### TimescaleDB extension not found
+
+**Error message:**
+```
+ERROR: extension "timescaledb" does not exist
+```
+
+**Solution:**
+
+<Steps>
+  <Step title="Install TimescaleDB extension">
+    Connect to PostgreSQL as superuser:
+    ```bash
+    psql -U postgres -d tsdb
+    ```
+
+    Create the extension:
+    ```sql
+    CREATE EXTENSION IF NOT EXISTS timescaledb;
+    ```
+  </Step>
+
+  <Step title="Verify installation">
+    ```sql
+    SELECT * FROM pg_extension WHERE extname = 'timescaledb';
+    ```
+  </Step>
+
+  <Step title="Re-run migrations">
+    ```bash
+    goose -dir migrations up
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+TimescaleDB must be installed on your PostgreSQL server. If using a managed database service, ensure TimescaleDB is supported and enabled.
+</Warning>
+
+### Migration already applied
+
+**Error message:**
+```
+goose: no migrations to run. current version: 20251213095702
+```
+
+**This is not an error.** All migrations are already applied. You can verify with:
+
+```bash
+goose -dir migrations status
+```
+
+### Migration rollback needed
+
+Rollback the last migration:
+
+```bash
+goose -dir migrations down
+```
+
+Rollback to a specific version:
+
+```bash
+goose -dir migrations down-to 20251208081023
+```
+
+Reset all migrations (destructive):
+
+```bash
+goose -dir migrations reset
+```
+
+<Warning>
+Rolling back migrations will delete data. Always backup your database before rolling back in production.
+</Warning>
+
+## URL monitoring issues
+
+### URL not added - "url is required"
+
+**Error message:**
+```
+url is required
+```
+
+**Solution:**
+
+Ensure you provide the URL as the first argument:
+
+```bash
+# Incorrect
+go run ./cmd/... add
+
+# Correct
+go run ./cmd/... add https://example.com get five_minutes admin@example.com
+```
+
+### "contact_email is required"
+
+**Error message:**
+```
+contact_email is required
+```
+
+**Solution:**
+
+Provide all four positional arguments:
+
+```bash
+go run ./cmd/... add <url> <http_method> <frequency> <contact_email>
+```
+
+Example:
+```bash
+go run ./cmd/... add https://example.com get five_minutes owner@example.com
+```
+
+### "Error parsing http method"
+
+**Error message:**
+```
+Error parsing http method: invalid http method: gett
+```
+
+**Solution:**
+
+Use a valid HTTP method. Supported methods:
+- `get`
+- `post`
+- `put`
+- `patch`
+- `delete`
+
+Example:
+```bash
+# Incorrect
+go run ./cmd/... add https://example.com gett five_minutes admin@example.com
+
+# Correct
+go run ./cmd/... add https://example.com get five_minutes admin@example.com
+```
+
+### "Error parsing frequency"
+
+**Error message:**
+```
+Error parsing frequency: invalid monitoring frequency: five_minute
+```
+
+**Solution:**
+
+Use a valid frequency value:
+- `ten_seconds`
+- `thirty_seconds`
+- `one_minute`
+- `five_minutes` (note the plural)
+- `thirty_minutes`
+- `one_hour`
+- `twelve_hours`
+- `twenty_four_hours`
+
+Example:
+```bash
+# Incorrect
+go run ./cmd/... add https://example.com get five_minute admin@example.com
+
+# Correct
+go run ./cmd/... add https://example.com get five_minutes admin@example.com
+```
+
+### URL not being monitored after adding
+
+**Possible causes:**
+
+<Accordion title="Watchdog service is not running">
+  Start the service:
+  ```bash
+  go run ./cmd/... guard
+  ```
+
+  Or check if it's running:
+  ```bash
+  # With systemd
+  sudo systemctl status watchdog
+
+  # With Docker
+  docker ps | grep watchdog
+  ```
+</Accordion>
+
+<Accordion title="Redis refresh failed">
+  When you add a URL, the system calls `RefreshRedisInterval` (see `/home/daytona/workspace/source/cmd/commands/add.go:101`). If this fails:
+
+  ```
+  Error adding url to redis
+  ```
+
+  Check:
+  - Redis is running and accessible
+  - No Redis connection errors in logs
+  - Redis has available memory
+
+  Manually verify the URL was added to the database:
+  ```bash
+  go run ./cmd/... list
+  ```
+</Accordion>
+
+<Accordion title="URL status is pending">
+  Newly added URLs have status `pending` until the first check completes. This is normal. Wait for one monitoring interval to pass, then check status:
+
+  ```bash
+  go run ./cmd/... list --status=pending
+  ```
+
+  After the first check, status should change to `healthy` or `unhealthy`.
+</Accordion>
+
+## Email notification issues
+
+### Notifications not being sent
+
+**Possible causes:**
+
+<Accordion title="Incorrect SMTP configuration">
+  Verify your `.env` SMTP settings:
+
+  ```bash
+  MAIL_FROM_ADDRESS="watchdog@example.com"
+  MAIL_HOST=smtp.example.com
+  MAIL_PORT=587
+  MAIL_USERNAME=your_smtp_username
+  MAIL_PASSWORD=your_smtp_password
+  ```
+
+  Test SMTP connection:
+  ```bash
+  # Using openssl
+  openssl s_client -connect smtp.example.com:587 -starttls smtp
+
+  # Using telnet
+  telnet smtp.example.com 587
+  ```
+</Accordion>
+
+<Accordion title="Firewall blocking SMTP port">
+  Check if port 587 (or 25/465) is open:
+
+  ```bash
+  telnet smtp.example.com 587
+  ```
+
+  For cloud servers, verify security group/firewall rules allow outbound SMTP.
+</Accordion>
+
+<Accordion title="No state transitions">
+  Emails are only sent when a URL changes state:
+  - Healthy → Unhealthy
+  - Unhealthy → Healthy
+
+  If a URL remains in the same state, no notifications are sent. This is by design.
+</Accordion>
+
+<Accordion title="Event listener not registered">
+  Verify event listeners are registered in the orchestrator. Check logs for listener registration messages.
+
+  The notification listener should be registered during orchestrator initialization.
+</Accordion>
+
+<Warning>
+For testing SMTP, consider using [Mailtrap](https://mailtrap.io/) or a similar service during development.
+</Warning>
+
+## Performance issues
+
+### High CPU usage
+
+**Possible causes:**
+
+<Accordion title="Too many monitored URLs">
+  Check how many URLs you're monitoring:
+  ```bash
+  go run ./cmd/... list | grep -c "ID:"
+  ```
+
+  If monitoring hundreds of URLs with high-frequency intervals (e.g., `ten_seconds`), consider:
+  - Increasing `MAXIMUM_WORK_POOL_SIZE` in `.env`
+  - Using longer intervals for non-critical URLs
+  - Deploying multiple Watchdog instances
+</Accordion>
+
+<Accordion title="HTTP request timeouts too long">
+  Reduce `HTTP_REQUEST_TIMEOUT` in `.env`:
+
+  ```bash
+  # Default is 5 seconds
+  HTTP_REQUEST_TIMEOUT=3
+  ```
+
+  This prevents slow URLs from blocking workers.
+</Accordion>
+
+<Accordion title="Database connection pool exhausted">
+  The default pgxpool configuration may be insufficient for high-load scenarios. Consider increasing the pool size by modifying the database initialization in `/home/daytona/workspace/source/cmd/commands/guard.go:65`.
+</Accordion>
+
+### High memory usage
+
+**Possible causes:**
+
+<Accordion title="Large batch sizes">
+  Reduce `SUPERVISOR_POOL_FLUSH_BATCHSIZE` in `.env`:
+
+  ```bash
+  # Default is 100
+  SUPERVISOR_POOL_FLUSH_BATCHSIZE=50
+  ```
+</Accordion>
+
+<Accordion title="Redis memory usage">
+  Check Redis memory:
+  ```bash
+  redis-cli INFO memory
+  ```
+
+  Set a max memory policy:
+  ```bash
+  redis-cli CONFIG SET maxmemory 256mb
+  redis-cli CONFIG SET maxmemory-policy allkeys-lru
+  ```
+</Accordion>
+
+<Accordion title="Too many child workers">
+  Reduce `MAXIMUM_CHILD_WORKERS` in `.env`:
+
+  ```bash
+  # Default is 5
+  MAXIMUM_CHILD_WORKERS=3
+  ```
+</Accordion>
+
+### Slow response times
+
+**Possible causes:**
+
+<Accordion title="Database performance">
+  Check database performance:
+
+  ```sql
+  -- Check slow queries
+  SELECT query, calls, total_time, mean_time
+  FROM pg_stat_statements
+  ORDER BY mean_time DESC
+  LIMIT 10;
+
+  -- Check table sizes
+  SELECT
+    schemaname,
+    tablename,
+    pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS size
+  FROM pg_tables
+  WHERE schemaname = 'public'
+  ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
+  ```
+
+  Consider:
+  - Adding indexes on frequently queried columns
+  - Running `VACUUM ANALYZE` periodically
+  - Archiving old time-series data from `url_status` table
+</Accordion>
+
+<Accordion title="Network latency to monitored URLs">
+  Check if monitored URLs are slow:
+
+  ```bash
+  # Test URL response time
+  curl -w "\nTime: %{time_total}s\n" -o /dev/null -s https://example.com
+  ```
+
+  If URLs are consistently slow, increase `HTTP_REQUEST_TIMEOUT` to prevent false negatives.
+</Accordion>
+
+## Command-line issues
+
+### "ID is required" when removing URL
+
+**Error message:**
+```
+ID is required
+```
+
+**Solution:**
+
+Provide the URL ID as an argument:
+
+```bash
+# Incorrect
+go run ./cmd/... remove
+
+# Correct
+go run ./cmd/... remove 42
+```
+
+Find the ID using the list command:
+```bash
+go run ./cmd/... list
+```
+
+### "page must be greater than 0"
+
+**Error message:**
+```
+page must be greater than 0
+```
+
+**Solution:**
+
+Page numbers start at 1:
+
+```bash
+# Incorrect
+go run ./cmd/... list --page=0
+
+# Correct
+go run ./cmd/... list --page=1
+```
+
+### Command alias conflict
+
+**Issue:**
+Both `add` and `analysis` commands use the `a` alias (see `/home/daytona/workspace/source/cmd/commands/add.go:116` and analysis command).
+
+**Solution:**
+
+Use full command names instead of aliases:
+
+```bash
+# Instead of
+go run ./cmd/... a https://example.com get five_minutes admin@example.com
+
+# Use
+go run ./cmd/... add https://example.com get five_minutes admin@example.com
+```
+
+## Logging and debugging
+
+### Enable verbose logging
+
+Watchdog uses `log/slog` for structured logging. The log level is controlled by `APP_ENV`:
+
+```bash
+# Development (more verbose)
+APP_ENV=dev
+
+# Production (less verbose)
+APP_ENV=production
+```
+
+### View real-time logs
+
+```bash
+# With systemd
+sudo journalctl -u watchdog -f
+
+# With Docker
+docker logs -f watchdog
+
+# Direct execution
+go run ./cmd/... guard
+```
+
+### Debug database queries
+
+Enable PostgreSQL query logging:
+
+```sql
+-- Connect to PostgreSQL
+psql -U postgres
+
+-- Enable query logging
+ALTER SYSTEM SET log_statement = 'all';
+SELECT pg_reload_conf();
+```
+
+View logs:
+```bash
+sudo tail -f /var/log/postgresql/postgresql-14-main.log
+```
+
+<Note>
+Remember to disable query logging in production as it can impact performance and generate large log files.
+</Note>
+
+### Debug Redis operations
+
+Monitor Redis commands in real-time:
+
+```bash
+redis-cli MONITOR
+```
+
+Check Redis keys:
+
+```bash
+redis-cli KEYS '*'
+```
+
+## Getting help
+
+If you're still experiencing issues:
+
+<Steps>
+  <Step title="Check the logs">
+    Review service logs for error messages and stack traces.
+  </Step>
+
+  <Step title="Verify configuration">
+    Double-check all environment variables in `.env` are correct.
+  </Step>
+
+  <Step title="Test dependencies">
+    Ensure PostgreSQL, TimescaleDB, and Redis are running and accessible.
+  </Step>
+
+  <Step title="Review the source code">
+    The error messages often reference specific files:
+    - Command handlers: `cmd/commands/*.go`
+    - Database operations: `database/*.go`
+    - Worker logic: `worker/*.go`
+    - Orchestration: `orchestrator/*.go`
+  </Step>
+</Steps>
+
+<Tip>
+When reporting issues, include:
+- Full error message and stack trace
+- Relevant environment variables (without passwords)
+- Steps to reproduce the issue
+- Watchdog version and Go version
+</Tip>

@@ -1,80 +1,335 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quick start
+description: Get Watchdog up and running in minutes and start monitoring your first URL
 ---
 
-## Get started in three steps
+## Prerequisites
 
-Get your documentation site running locally and make your first customization.
+Before you begin, make sure you have the following installed:
 
-### Step 1: Set up your local environment
+- **Go 1.24 or later** - [Download Go](https://go.dev/dl/)
+- **PostgreSQL with TimescaleDB** - [Install TimescaleDB](https://docs.timescale.com/install/)
+- **Redis** - [Install Redis](https://redis.io/download)
+- **Goose CLI** - For database migrations
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+<CodeGroup>
 
-### Step 2: Deploy your changes
+```bash Install Goose
+go install github.com/pressly/goose/v3/cmd/goose@latest
+```
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+```bash Verify Go version
+go version
+# Should output: go version go1.24.0 or later
+```
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+</CodeGroup>
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  You'll also need SMTP credentials for email notifications. Services like [Mailtrap](https://mailtrap.io), [SendGrid](https://sendgrid.com), or your own SMTP server will work.
 </Note>
+
+## Installation
+
+<Steps>
+  <Step title="Clone the repository">
+    Get the Watchdog source code from your repository:
+
+    ```bash
+    git clone <your-repo-url>
+    cd watchdog
+    ```
+  </Step>
+
+  <Step title="Install dependencies">
+    Download all Go module dependencies:
+
+    ```bash
+    go mod download
+    ```
+
+    The project uses these key dependencies:
+    - `github.com/jackc/pgx/v5` - PostgreSQL driver
+    - `github.com/redis/go-redis/v9` - Redis client
+    - `github.com/urfave/cli/v3` - CLI framework
+    - `gopkg.in/mail.v2` - Email sending
+  </Step>
+
+  <Step title="Build the binary (optional)">
+    You can either run with `go run` or build a binary:
+
+    ```bash
+    go build -o watchdog ./cmd/...
+    ```
+
+    This creates a `watchdog` executable you can run directly.
+  </Step>
+</Steps>
+
+## Configuration
+
+<Steps>
+  <Step title="Create environment file">
+    Copy the example environment file and edit it with your settings:
+
+    ```bash
+    cp .env.example .env
+    ```
+  </Step>
+
+  <Step title="Configure database settings">
+    Update these database variables in your `.env` file:
+
+    ```bash .env
+    DB_USER=tsdbadmin
+    DB_PASSWORD=your_password
+    DB_HOST=localhost
+    DB_PORT=5432
+    DB_DATABASE=tsdb
+    ```
+
+    <Warning>
+      Make sure your PostgreSQL instance has the TimescaleDB extension installed. You can verify this by connecting to your database and running:
+      
+      ```sql
+      CREATE EXTENSION IF NOT EXISTS timescaledb;
+      ```
+    </Warning>
+  </Step>
+
+  <Step title="Configure Redis">
+    Set your Redis connection details:
+
+    ```bash .env
+    REDIS_HOST=127.0.0.1:6379
+    REDIS_PASS=''
+    REDIS_DB=2
+    ```
+  </Step>
+
+  <Step title="Configure SMTP for notifications">
+    Add your SMTP credentials for email alerts:
+
+    ```bash .env
+    MAIL_FROM_ADDRESS="watchdog@yourcompany.com"
+    MAIL_HOST=sandbox.smtp.mailtrap.io
+    MAIL_PORT=2525
+    MAIL_USERNAME=your_username
+    MAIL_PASSWORD=your_password
+    ```
+  </Step>
+
+  <Step title="Set worker configuration">
+    Configure the monitoring system's concurrency:
+
+    ```bash .env
+    MAXIMUM_CHILD_WORKERS=5
+    MAXIMUM_WORK_POOL_SIZE=25
+    HTTP_REQUEST_TIMEOUT=5
+    SUPERVISOR_POOL_FLUSH_TIMEOUT=5
+    SUPERVISOR_POOL_FLUSH_BATCHSIZE=100
+    ```
+
+    <Note>
+      `MAXIMUM_CHILD_WORKERS` controls how many concurrent checks run per interval group. `MAXIMUM_WORK_POOL_SIZE` sets the total concurrency limit across all workers.
+    </Note>
+  </Step>
+</Steps>
+
+## Database setup
+
+<Steps>
+  <Step title="Run migrations">
+    Create the required database tables using Goose:
+
+    ```bash
+    goose -dir migrations up
+    ```
+
+    This creates three tables:
+    - `urls` - Stores monitored URL metadata
+    - `url_status` - TimescaleDB hypertable for time-series metrics
+    - `incidents` - Tracks downtime incidents
+  </Step>
+
+  <Step title="Verify tables">
+    Connect to your database and verify the tables exist:
+
+    ```sql
+    \dt
+    -- Should show: urls, url_status, incidents
+    ```
+  </Step>
+</Steps>
+
+## Add your first URL
+
+Now you're ready to add a URL to monitor:
+
+<CodeGroup>
+
+```bash Using go run
+go run ./cmd/... add https://example.com get five_minutes admin@example.com
+```
+
+```bash Using built binary
+./watchdog add https://example.com get five_minutes admin@example.com
+```
+
+</CodeGroup>
+
+The `add` command accepts four positional arguments:
+
+1. **URL** - The endpoint to monitor (required)
+2. **HTTP method** - `get`, `post`, `patch`, `put`, or `delete` (default: `get`)
+3. **Frequency** - How often to check (default: `five_minutes`)
+4. **Contact email** - Where to send alerts (required)
+
+### Available monitoring frequencies
+
+- `ten_seconds` - Check every 10 seconds
+- `thirty_seconds` - Check every 30 seconds
+- `one_minute` - Check every minute
+- `five_minutes` - Check every 5 minutes
+- `thirty_minutes` - Check every 30 minutes
+- `one_hour` - Check every hour
+- `twelve_hours` - Check twice daily
+- `twenty_four_hours` - Check once daily
+
+<Note>
+  When you add a URL, Watchdog automatically persists it to the database and refreshes the Redis interval list so workers can immediately start monitoring it.
+</Note>
+
+## Start monitoring
+
+Launch the Watchdog monitoring service:
+
+<CodeGroup>
+
+```bash Using go run
+go run ./cmd/... guard
+```
+
+```bash Using built binary
+./watchdog guard
+```
+
+```bash Using alias
+go run ./cmd/... g
+```
+
+</CodeGroup>
+
+You should see output indicating the service has started:
+
+```
+Connected to PostgreSQL database!
+Watchdog is running
+```
+
+The `guard` command:
+- Connects to Redis and PostgreSQL
+- Initializes the orchestrator and supervisor
+- Creates worker groups for all configured intervals
+- Starts monitoring all added URLs
+- Publishes events to the event bus
+- Listens for state changes and sends notifications
+
+<Warning>
+  Keep the guard process running. If you stop it, monitoring will pause until you restart it. Consider using a process manager like `systemd`, `supervisord`, or Docker for production deployments.
+</Warning>
+
+## Manage monitored URLs
+
+### List all URLs
+
+View your monitored URLs with pagination and filtering:
+
+<CodeGroup>
+
+```bash List all URLs
+go run ./cmd/... list --page=1 --per_page=20
+```
+
+```bash Filter by frequency
+go run ./cmd/... list --frequency=five_minutes
+```
+
+```bash Filter by status
+go run ./cmd/... list --status=healthy
+```
+
+```bash Combine filters
+go run ./cmd/... list --http_method=get --frequency=one_minute --status=healthy
+```
+
+</CodeGroup>
+
+Example output:
+
+```
+Page 1 (showing 2 results)
+→ Next: --page=2
+------------------------------------------------------------
+1. https://example.com
+   ID: 1 | Method: GET | Status: Healthy | Frequency: five_minutes
+   Contact: admin@example.com
+
+2. https://api.example.com/health
+   ID: 2 | Method: GET | Status: Healthy | Frequency: one_minute
+   Contact: devops@example.com
+
+------------------------------------------------------------
+More results available. Use --page=2 to continue.
+```
+
+### Remove a URL
+
+Stop monitoring a URL by its ID:
+
+```bash
+go run ./cmd/... remove 1
+```
+
+This deletes the URL from the database and refreshes the Redis list for that frequency interval.
+
+### Analyze a URL
+
+Run an ad-hoc analysis on a monitored URL:
+
+```bash
+go run ./cmd/... analysis 1
+```
+
+## What's next?
+
+<CardGroup cols={2}>
+  <Card
+    title="Architecture deep dive"
+    icon="diagram-project"
+    href="/architecture/overview"
+  >
+    Learn how Watchdog's event-driven system works under the hood
+  </Card>
+  <Card
+    title="CLI reference"
+    icon="terminal"
+    href="/cli/overview"
+  >
+    Explore all available commands and their options
+  </Card>
+  <Card
+    title="Configuration"
+    icon="gear"
+    href="/configuration/environment"
+  >
+    Fine-tune worker pools, timeouts, and monitoring behavior
+  </Card>
+  <Card
+    title="Running service"
+    icon="server"
+    href="/guides/running-service"
+  >
+    Production deployment guides for Docker, systemd, and cloud platforms
+  </Card>
+</CardGroup>

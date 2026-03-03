@@ -1,0 +1,537 @@
+---
+title: Email configuration
+description: Configure SMTP settings and email notifications for site status changes
+---
+
+Watchdog sends email notifications when monitored URLs experience status changes (healthy to unhealthy or vice versa). This guide covers SMTP configuration and email notification setup.
+
+## Overview
+
+Email notifications are triggered by event listeners that respond to status change events published by the supervisor. When a monitored URL's status changes, an email is sent to the configured contact address.
+
+**Notification triggers:**
+- URL goes from healthy to unhealthy (downtime alert)
+- URL recovers from unhealthy to healthy (recovery notification)
+- First check result for a new URL
+
+## SMTP configuration
+
+Configure SMTP settings in your `.env` file:
+
+```bash .env
+MAIL_FROM_ADDRESS="notifications@watchdog.com"
+MAIL_HOST=smtp.sendgrid.net
+MAIL_PORT=587
+MAIL_USERNAME=apikey
+MAIL_PASSWORD=your_sendgrid_api_key
+```
+
+### Environment variables
+
+<ParamField path="MAIL_FROM_ADDRESS" type="string" required>
+  Sender email address that appears in the "From" field of notification emails.
+  
+  **Examples:**
+  - `notifications@watchdog.com` - Dedicated notifications address
+  - `alerts@example.com` - Company alerts address
+  - `noreply@watchdog.com` - No-reply address
+  
+  <Note>
+  Ensure this address is authorized to send emails through your SMTP provider. Some providers require sender verification.
+  </Note>
+</ParamField>
+
+<ParamField path="MAIL_HOST" type="string" required>
+  SMTP server hostname.
+  
+  **Common SMTP providers:**
+  - **SendGrid**: `smtp.sendgrid.net`
+  - **Mailgun**: `smtp.mailgun.org`
+  - **Gmail**: `smtp.gmail.com`
+  - **AWS SES**: `email-smtp.us-east-1.amazonaws.com`
+  - **Mailtrap** (dev/testing): `sandbox.smtp.mailtrap.io`
+</ParamField>
+
+<ParamField path="MAIL_PORT" type="integer" required>
+  SMTP server port number.
+  
+  **Common ports:**
+  - `587` - SMTP with STARTTLS (recommended for production)
+  - `465` - SMTP over SSL/TLS
+  - `2525` - Alternative port (used by Mailtrap and some providers)
+  - `25` - Standard SMTP (often blocked by ISPs, not recommended)
+  
+  <Warning>
+  Port 587 with STARTTLS is recommended for production deployments as it provides encryption and is widely supported.
+  </Warning>
+</ParamField>
+
+<ParamField path="MAIL_USERNAME" type="string" required>
+  SMTP authentication username.
+  
+  **Provider-specific notes:**
+  - **SendGrid**: Use `apikey` as the username
+  - **Mailgun**: Use your Mailgun SMTP username
+  - **Gmail**: Use your full Gmail address
+  - **AWS SES**: Use your SMTP credentials username
+</ParamField>
+
+<ParamField path="MAIL_PASSWORD" type="string" required>
+  SMTP authentication password or API key.
+  
+  **Provider-specific notes:**
+  - **SendGrid**: Use your SendGrid API key
+  - **Mailgun**: Use your Mailgun SMTP password
+  - **Gmail**: Use an app-specific password (not your account password)
+  - **AWS SES**: Use your SMTP credentials password
+  
+  <Warning>
+  Never commit SMTP credentials to version control. Always use environment variables and keep your `.env` file gitignored.
+  </Warning>
+</ParamField>
+
+## Email implementation
+
+Watchdog uses the `gopkg.in/mail.v2` package for sending emails:
+
+<CodeGroup>
+
+```go core/email.go
+type SendEmailConfig struct {
+	Recipients  []string
+	Subject     string
+	Content     string
+	ContentType string
+}
+
+func SendEmail(emailConfig SendEmailConfig) error {
+	message := gomail.NewMessage()
+
+	emailTo := strings.Join(emailConfig.Recipients, ",")
+
+	message.SetHeader("From", env.FetchString("MAIL_FROM_ADDRESS"))
+	message.SetHeader("To", emailTo)
+	message.SetHeader("Subject", emailConfig.Subject)
+
+	message.SetBody(emailConfig.ContentType, emailConfig.Content)
+
+	dialer := gomail.NewDialer(
+		env.FetchString("MAIL_HOST"),
+		env.FetchInt("MAIL_PORT"),
+		env.FetchString("MAIL_USERNAME"),
+		env.FetchString("MAIL_PASSWORD"),
+	)
+
+	if err := dialer.DialAndSend(message); err != nil {
+		return err
+	}
+
+	log.Println("Email sent successfully to recipients:", emailConfig.Recipients)
+	return nil
+}
+```
+
+</CodeGroup>
+
+**Features:**
+- Multiple recipients support
+- Custom subject and content
+- Configurable content type (HTML or plain text)
+- Automatic SMTP connection management
+- Error handling and logging
+
+## Configuring recipient emails
+
+When adding a URL to monitor, specify the contact email for notifications:
+
+<CodeGroup>
+
+```bash CLI
+go run ./cmd/... add https://example.com get five_minutes owner@example.com
+```
+
+```go Programmatic
+id, err := urlRepo.Add(
+	ctx,
+	"https://example.com",
+	enums.Get,
+	enums.FiveMinutes,
+	"owner@example.com", // Notification recipient
+)
+```
+
+</CodeGroup>
+
+Each monitored URL has its own contact email, allowing you to route notifications to different teams or individuals based on service ownership.
+
+<Note>
+You can use the same contact email for multiple URLs, or set up distribution lists (e.g., `team-alerts@example.com`) to notify multiple people.
+</Note>
+
+## SMTP provider setup
+
+<Accordion title="SendGrid">
+
+**Steps:**
+
+1. Create a SendGrid account at [sendgrid.com](https://sendgrid.com)
+2. Generate an API key:
+   - Go to Settings → API Keys
+   - Click "Create API Key"
+   - Select "Restricted Access" and enable "Mail Send"
+3. Verify your sender domain or single sender email
+4. Configure your `.env`:
+
+```bash
+MAIL_FROM_ADDRESS="notifications@yourdomain.com"
+MAIL_HOST=smtp.sendgrid.net
+MAIL_PORT=587
+MAIL_USERNAME=apikey
+MAIL_PASSWORD=SG.your_api_key_here
+```
+
+**Pricing:** Free tier includes 100 emails/day
+
+</Accordion>
+
+<Accordion title="Mailgun">
+
+**Steps:**
+
+1. Create a Mailgun account at [mailgun.com](https://mailgun.com)
+2. Add and verify your domain
+3. Get your SMTP credentials from Settings → SMTP
+4. Configure your `.env`:
+
+```bash
+MAIL_FROM_ADDRESS="alerts@yourdomain.com"
+MAIL_HOST=smtp.mailgun.org
+MAIL_PORT=587
+MAIL_USERNAME=postmaster@yourdomain.com
+MAIL_PASSWORD=your_mailgun_smtp_password
+```
+
+**Pricing:** Free tier includes 5,000 emails/month for 3 months
+
+</Accordion>
+
+<Accordion title="Gmail">
+
+**Steps:**
+
+1. Enable 2-factor authentication on your Google account
+2. Generate an app-specific password:
+   - Go to [myaccount.google.com](https://myaccount.google.com)
+   - Security → 2-Step Verification → App passwords
+   - Generate password for "Mail"
+3. Configure your `.env`:
+
+```bash
+MAIL_FROM_ADDRESS="your-email@gmail.com"
+MAIL_HOST=smtp.gmail.com
+MAIL_PORT=587
+MAIL_USERNAME=your-email@gmail.com
+MAIL_PASSWORD=your_app_specific_password
+```
+
+<Warning>
+**Gmail limitations:** 
+- 500 recipients per day for free accounts
+- 2,000 recipients per day for Google Workspace
+- Not recommended for high-volume production use
+</Warning>
+
+</Accordion>
+
+<Accordion title="AWS SES">
+
+**Steps:**
+
+1. Create an AWS account and enable SES in your region
+2. Verify your sender email or domain:
+   - Go to SES → Verified identities
+   - Add and verify your email/domain
+3. Request production access (by default, SES starts in sandbox mode)
+4. Create SMTP credentials:
+   - Go to SES → SMTP settings
+   - Click "Create SMTP Credentials"
+5. Configure your `.env`:
+
+```bash
+MAIL_FROM_ADDRESS="notifications@yourdomain.com"
+MAIL_HOST=email-smtp.us-east-1.amazonaws.com
+MAIL_PORT=587
+MAIL_USERNAME=your_smtp_username
+MAIL_PASSWORD=your_smtp_password
+```
+
+**Pricing:** $0.10 per 1,000 emails, includes 62,000 free emails/month on AWS Free Tier
+
+</Accordion>
+
+<Accordion title="Mailtrap (Development/Testing)">
+
+**Steps:**
+
+1. Create a Mailtrap account at [mailtrap.io](https://mailtrap.io)
+2. Create an inbox (or use the default one)
+3. Get SMTP credentials from inbox settings
+4. Configure your `.env`:
+
+```bash
+MAIL_FROM_ADDRESS="test@example.com"
+MAIL_HOST=sandbox.smtp.mailtrap.io
+MAIL_PORT=2525
+MAIL_USERNAME=your_mailtrap_username
+MAIL_PASSWORD=your_mailtrap_password
+```
+
+<Note>
+**Mailtrap captures emails** instead of sending them to recipients. Perfect for development and testing without risking sending test emails to real users.
+</Note>
+
+</Accordion>
+
+## Testing email configuration
+
+Verify your SMTP settings are working correctly:
+
+<Steps>
+
+<Step title="Add a test URL">
+  Add a URL to monitor with your email address:
+  
+  ```bash
+  go run ./cmd/... add https://httpstat.us/200 get one_minute your-email@example.com
+  ```
+</Step>
+
+<Step title="Start the guard">
+  Start the Watchdog monitoring service:
+  
+  ```bash
+  go run ./cmd/... guard
+  ```
+  
+  The first check will trigger a notification email.
+</Step>
+
+<Step title="Verify email delivery">
+  Check your inbox (or Mailtrap inbox for testing) for the notification email.
+  
+  If using a dev SMTP provider like Mailtrap, verify the email appears in the inbox dashboard.
+</Step>
+
+<Step title="Test status change notifications">
+  Trigger a status change by monitoring an unreliable endpoint:
+  
+  ```bash
+  # Add URL that randomly fails
+  go run ./cmd/... add https://httpstat.us/random/200,500 get thirty_seconds your-email@example.com
+  ```
+  
+  You should receive emails when the status changes between healthy and unhealthy.
+</Step>
+
+</Steps>
+
+## Customizing email templates
+
+The `SendEmail` function accepts a `SendEmailConfig` with customizable content:
+
+```go
+core.SendEmail(core.SendEmailConfig{
+	Recipients:  []string{"owner@example.com"},
+	Subject:     "Alert: example.com is down",
+	Content:     "<h1>Status Change Detected</h1><p>Your site example.com is currently unreachable.</p>",
+	ContentType: "text/html",
+})
+```
+
+**Content types:**
+- `text/plain` - Plain text emails
+- `text/html` - HTML emails with formatting
+
+<Note>
+To customize notification templates, modify the event listener code in `events/listeners/` that calls `SendEmail()` in response to status change events.
+</Note>
+
+## Notification architecture
+
+Email notifications are triggered by the event-driven architecture:
+
+```
+┌──────────────┐
+│  Supervisor  │
+└──────┬───────┘
+       │ Publishes status change event
+       ↓
+┌──────────────┐
+│  Event Bus   │
+└──────┬───────┘
+       │ Notifies listeners
+       ↓
+┌──────────────────┐
+│ Email Listener   │ → Calls SendEmail()
+└──────────────────┘
+```
+
+**Event flow:**
+
+1. Child workers perform HTTP checks and send results to supervisor
+2. Supervisor evaluates results and detects status changes
+3. Supervisor publishes `ping.successful` or `ping.unsuccessful` events
+4. Email listener subscribes to these events
+5. On status change, listener calls `SendEmail()` with notification details
+6. SMTP client sends email to configured recipient
+
+## Troubleshooting
+
+<Accordion title="SMTP authentication failed">
+
+**Symptoms**: `SMTP AUTH failed` or `535 Authentication failed`
+
+**Solutions:**
+1. Verify `MAIL_USERNAME` and `MAIL_PASSWORD` are correct
+2. For Gmail, ensure you're using an app-specific password, not your account password
+3. Check if your SMTP provider requires sender verification
+4. Verify your account is not suspended or has exceeded quotas
+
+</Accordion>
+
+<Accordion title="Connection timeout or refused">
+
+**Symptoms**: `dial tcp: connect: connection refused` or timeout errors
+
+**Solutions:**
+1. Verify `MAIL_HOST` and `MAIL_PORT` are correct
+2. Check firewall rules allow outbound connections on the SMTP port
+3. Try alternative ports (587, 465, 2525)
+4. Verify your hosting provider doesn't block SMTP connections
+
+</Accordion>
+
+<Accordion title="Emails not delivered (no errors)">
+
+**Symptoms**: `SendEmail()` succeeds but recipients don't receive emails
+
+**Solutions:**
+1. Check recipient spam/junk folders
+2. Verify sender domain has SPF and DKIM records configured
+3. Check SMTP provider's delivery logs for bounces
+4. Verify `MAIL_FROM_ADDRESS` is authorized by your provider
+5. Check if recipient email addresses are valid
+
+</Accordion>
+
+<Accordion title="SSL/TLS errors">
+
+**Symptoms**: `x509: certificate signed by unknown authority`
+
+**Solutions:**
+1. Ensure you're using the correct port for your encryption method:
+   - Port 587 uses STARTTLS (encryption after connection)
+   - Port 465 uses implicit SSL/TLS (encrypted from start)
+2. For self-signed certificates (development only), you may need to disable certificate verification
+3. Update your system's CA certificates: `sudo update-ca-certificates`
+
+</Accordion>
+
+<Accordion title="Rate limiting errors">
+
+**Symptoms**: `550 Rate limit exceeded` or `429 Too Many Requests`
+
+**Solutions:**
+1. Reduce monitoring frequency for URLs
+2. Implement email throttling or batching
+3. Upgrade your SMTP provider plan
+4. Use separate SMTP accounts for different environments (dev/staging/prod)
+
+</Accordion>
+
+## Best practices
+
+<Steps>
+
+<Step title="Use transactional email providers">
+  Use dedicated transactional email services (SendGrid, Mailgun, AWS SES) instead of personal email accounts for better deliverability and reliability.
+</Step>
+
+<Step title="Configure sender authentication">
+  Set up SPF, DKIM, and DMARC records for your sending domain to improve email deliverability and prevent spoofing:
+  
+  ```dns
+  ; SPF record
+  @ IN TXT "v=spf1 include:_spf.google.com ~all"
+  
+  ; DMARC record
+  _dmarc IN TXT "v=DMARC1; p=quarantine; rua=mailto:postmaster@yourdomain.com"
+  ```
+</Step>
+
+<Step title="Monitor email delivery">
+  Track email delivery success rates and bounce rates using your SMTP provider's dashboard.
+  
+  Consider implementing retry logic for failed email sends.
+</Step>
+
+<Step title="Separate environments">
+  Use different SMTP configurations for development, staging, and production:
+  
+  - **Development**: Mailtrap or similar email capture service
+  - **Staging**: Separate SMTP account with test recipient lists
+  - **Production**: Production SMTP account with real recipients
+</Step>
+
+<Step title="Implement email batching">
+  For high-frequency monitoring, consider batching multiple status changes into digest emails to avoid overwhelming recipients and hitting rate limits.
+</Step>
+
+</Steps>
+
+## Advanced configuration
+
+### Custom email content
+
+To customize notification email content, modify the event listener that calls `SendEmail()`:
+
+```go
+subject := fmt.Sprintf("Alert: %s status changed to %s", url, status)
+content := fmt.Sprintf(`
+<html>
+<body>
+  <h2>Watchdog Status Alert</h2>
+  <p><strong>URL:</strong> %s</p>
+  <p><strong>Status:</strong> %s</p>
+  <p><strong>Timestamp:</strong> %s</p>
+  <p>Check the dashboard for more details.</p>
+</body>
+</html>
+`, url, status, time.Now().Format(time.RFC1123))
+
+core.SendEmail(core.SendEmailConfig{
+	Recipients:  []string{contactEmail},
+	Subject:     subject,
+	Content:     content,
+	ContentType: "text/html",
+})
+```
+
+### Multiple SMTP providers
+
+For redundancy, implement fallback SMTP providers:
+
+```go
+func SendEmailWithFallback(config SendEmailConfig) error {
+	err := SendEmailViaPrimary(config)
+	if err != nil {
+		log.Printf("Primary SMTP failed: %v, trying fallback", err)
+		return SendEmailViaFallback(config)
+	}
+	return nil
+}
+```
+
+### Email queueing
+
+For high-volume deployments, consider implementing an email queue using Redis or a message broker to decouple email sending from event processing.

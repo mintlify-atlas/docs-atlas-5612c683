@@ -1,0 +1,530 @@
+---
+title: Database setup
+description: Configure PostgreSQL and TimescaleDB for Watchdog's time-series monitoring data
+---
+
+Watchdog uses PostgreSQL with the TimescaleDB extension to store URL metadata and time-series monitoring metrics. This guide covers database setup, configuration, migrations, and connection pooling.
+
+## Overview
+
+The database architecture consists of:
+
+- **PostgreSQL** - Primary relational database for URL metadata
+- **TimescaleDB** - Time-series extension for storing monitoring metrics
+- **pgx** - High-performance PostgreSQL driver and connection pool
+- **Goose** - Database migration tool for schema management
+
+## Prerequisites
+
+<Steps>
+
+<Step title="Install PostgreSQL">
+  Install PostgreSQL 12 or higher:
+  
+  ```bash
+  # Ubuntu/Debian
+  sudo apt-get install postgresql postgresql-contrib
+  
+  # macOS
+  brew install postgresql
+  
+  # Docker
+  docker run -d --name postgres -e POSTGRES_PASSWORD=mypassword -p 5432:5432 postgres:15
+  ```
+</Step>
+
+<Step title="Install TimescaleDB">
+  Install the TimescaleDB extension:
+  
+  ```bash
+  # Ubuntu/Debian
+  sudo add-apt-repository ppa:timescale/timescaledb-ppa
+  sudo apt-get update
+  sudo apt-get install timescaledb-postgresql-15
+  
+  # macOS
+  brew tap timescale/tap
+  brew install timescaledb
+  
+  # Docker (recommended)
+  docker run -d --name timescaledb -e POSTGRES_PASSWORD=mypassword -p 5432:5432 timescale/timescaledb:latest-pg15
+  ```
+  
+  <Note>
+  Using the official TimescaleDB Docker image is the easiest way to get started with both PostgreSQL and TimescaleDB pre-configured.
+  </Note>
+</Step>
+
+<Step title="Install Goose CLI">
+  Install the Goose migration tool:
+  
+  ```bash
+  go install github.com/pressly/goose/v3/cmd/goose@latest
+  ```
+</Step>
+
+</Steps>
+
+## Database configuration
+
+Configure database connection settings in your `.env` file:
+
+```bash .env
+DB_USER=tsdbadmin
+DB_PASSWORD=your_secure_password
+DB_HOST=localhost
+DB_PORT=5432
+DB_DATABASE=tsdb
+
+GOOSE_DRIVER=postgres
+GOOSE_DBSTRING="postgresql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_DATABASE}?sslmode=disable"
+GOOSE_MIGRATION_DIR=migrations
+```
+
+<Warning>
+**Production security**: Replace `sslmode=disable` with `sslmode=require` in production to enforce encrypted connections.
+</Warning>
+
+### Environment variables
+
+<ParamField path="DB_USER" type="string" required>
+  PostgreSQL username with permissions to create tables and extensions.
+</ParamField>
+
+<ParamField path="DB_PASSWORD" type="string" required>
+  PostgreSQL password for authentication.
+</ParamField>
+
+<ParamField path="DB_HOST" type="string" required>
+  Database server hostname or IP address (`localhost` for local development).
+</ParamField>
+
+<ParamField path="DB_PORT" type="string" required>
+  Database server port (default PostgreSQL port is `5432`).
+</ParamField>
+
+<ParamField path="DB_DATABASE" type="string" required>
+  Name of the database to use for Watchdog.
+</ParamField>
+
+## Initial setup
+
+<Steps>
+
+<Step title="Create database">
+  Create the Watchdog database:
+  
+  ```bash
+  # Using psql
+  psql -U postgres -c "CREATE DATABASE tsdb;"
+  
+  # Or connect and create
+  psql -U postgres
+  CREATE DATABASE tsdb;
+  \q
+  ```
+</Step>
+
+<Step title="Enable TimescaleDB extension">
+  Connect to the database and enable TimescaleDB:
+  
+  ```sql
+  psql -U postgres -d tsdb
+  CREATE EXTENSION IF NOT EXISTS timescaledb;
+  \dx  -- Verify extension is installed
+  \q
+  ```
+  
+  <Note>
+  The TimescaleDB extension must be enabled before running migrations, as migrations create hypertables that depend on it.
+  </Note>
+</Step>
+
+<Step title="Run migrations">
+  Apply database migrations using Goose:
+  
+  ```bash
+  # From project root
+  goose -dir migrations postgres "postgresql://tsdbadmin:password@localhost:5432/tsdb?sslmode=disable" up
+  
+  # Check migration status
+  goose -dir migrations postgres "postgresql://tsdbadmin:password@localhost:5432/tsdb?sslmode=disable" status
+  ```
+</Step>
+
+</Steps>
+
+## Database schema
+
+Watchdog uses three main tables:
+
+### URLs table
+
+Stores metadata for monitored URLs:
+
+```sql migrations/20251115112101_create_urls_table.sql
+CREATE TABLE urls
+(
+    id            SERIAL PRIMARY KEY,
+    url           TEXT         NOT NULL,
+    http_method   VARCHAR(255)       NOT NULL,
+    status        VARCHAR(255)  NOT NULL,
+    monitoring_frequency  VARCHAR(255)  NOT NULL,
+    contact_email VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+**Columns:**
+- `id` - Unique identifier for the URL
+- `url` - The URL being monitored
+- `http_method` - HTTP method to use (`get`, `post`, `patch`, `put`, `delete`)
+- `status` - Current health status (`healthy`, `unhealthy`, `pending`)
+- `monitoring_frequency` - Check interval (`ten_seconds`, `one_minute`, `five_minutes`, etc.)
+- `contact_email` - Email address for status change notifications
+- `created_at` / `updated_at` - Timestamps
+
+### URL statuses table (hypertable)
+
+Stores time-series monitoring metrics:
+
+```sql migrations/20251208081023_create_url_status_table.sql
+CREATE TABLE url_statuses
+(
+    time     TIMESTAMPTZ NOT NULL,
+    url_id   BIGINT      NOT NULL REFERENCES urls(id) ON DELETE CASCADE,
+    status   BOOLEAN     NOT NULL
+);
+
+SELECT create_hypertable('url_statuses', 'time');
+```
+
+**Columns:**
+- `time` - Timestamp of the check (hypertable partition key)
+- `url_id` - Foreign key to `urls` table
+- `status` - Check result (`true` for success, `false` for failure)
+
+<Note>
+`create_hypertable()` converts this table into a TimescaleDB hypertable, enabling efficient time-series queries and automatic partitioning.
+</Note>
+
+### Incidents table (hypertable)
+
+Tracks downtime incidents:
+
+```sql migrations/20251213095702_create_incidents_table.sql
+CREATE TABLE incidents
+(
+    time     TIMESTAMPTZ NOT NULL,
+    url_id   BIGINT      NOT NULL REFERENCES urls(id) ON DELETE CASCADE,
+    resolved_at TIMESTAMPTZ DEFAULT NULL
+);
+
+SELECT create_hypertable('incidents', 'time');
+```
+
+**Columns:**
+- `time` - Incident start time (hypertable partition key)
+- `url_id` - Foreign key to monitored URL
+- `resolved_at` - Timestamp when incident was resolved (NULL for ongoing incidents)
+
+## Connection pooling
+
+Watchdog uses `pgxpool` for efficient connection management:
+
+<CodeGroup>
+
+```go cmd/commands/guard.go
+func InitiateDB(ctx context.Context, logger *slog.Logger) *pgxpool.Pool {
+	pool, err := pgxpool.New(ctx, fmt.Sprintf(
+		"postgres://%v:%v@%v:%v/%v",
+		env.FetchString("DB_USER"),
+		env.FetchString("DB_PASSWORD"),
+		env.FetchString("DB_HOST"),
+		env.FetchString("DB_PORT"),
+		env.FetchString("DB_DATABASE"),
+	))
+	if err != nil {
+		panic(fmt.Sprintf("pgxpool connection failed: %v", err))
+	}
+	if err := pool.Ping(ctx); err != nil {
+		logger.Error("pgxpool connection failed: ", err)
+		os.Exit(0)
+	}
+	fmt.Println("Connected to PostgreSQL database!")
+	return pool
+}
+```
+
+</CodeGroup>
+
+### Connection pool configuration
+
+The `pgxpool` library automatically manages connection pooling with sensible defaults. You can customize pool behavior by modifying the connection string:
+
+```go
+// Custom pool configuration
+config, err := pgxpool.ParseConfig(fmt.Sprintf(
+	"postgres://%s:%s@%s:%s/%s?pool_max_conns=20&pool_min_conns=5",
+	dbUser, dbPassword, dbHost, dbPort, dbName,
+))
+if err != nil {
+	panic(err)
+}
+
+// Customize pool settings
+config.MaxConns = 20                      // Maximum number of connections
+config.MinConns = 5                       // Minimum idle connections
+config.MaxConnLifetime = time.Hour        // Maximum connection lifetime
+config.MaxConnIdleTime = 30 * time.Minute // Maximum idle time
+
+pool, err := pgxpool.NewWithConfig(ctx, config)
+```
+
+**Default pool settings:**
+- **Max connections**: Determined by server resources (typically 4-10)
+- **Min connections**: 0 (connections created on demand)
+- **Connection lifetime**: Unlimited
+- **Idle timeout**: Unlimited
+
+<Note>
+For most deployments, the default settings are sufficient. Tune pool size based on your concurrency requirements and database server capacity.
+</Note>
+
+## Repository pattern
+
+Watchdog uses the repository pattern to abstract database operations:
+
+<CodeGroup>
+
+```go database/url_repository.go
+type UrlRepository interface {
+	FetchAll(ctx context.Context, limit int, offset int, filter UrlQueryFilter) ([]Url, error)
+	Add(ctx context.Context, url string, httpMethod enums.HttpMethod, frequency enums.MonitoringFrequency, contactEmail string) (int, error)
+	Delete(ctx context.Context, Id int) error
+	FindById(ctx context.Context, Id int) (Url, error)
+	UpdateStatus(ctx context.Context, Id int, status enums.SiteHealth) error
+}
+
+func NewUrlRepository(pool *pgxpool.Pool) UrlRepository {
+	return urlRepository{
+		pool: pool,
+	}
+}
+```
+
+</CodeGroup>
+
+**Benefits:**
+- Decouples business logic from SQL
+- Enables easy testing with mock repositories
+- Provides type-safe database operations
+- Centralizes query logic
+
+## Migrations
+
+Watchdog uses Goose for schema versioning and migrations.
+
+### Running migrations
+
+<CodeGroup>
+
+```bash Apply all pending migrations
+goose -dir migrations postgres "$GOOSE_DBSTRING" up
+```
+
+```bash Rollback last migration
+goose -dir migrations postgres "$GOOSE_DBSTRING" down
+```
+
+```bash Check migration status
+goose -dir migrations postgres "$GOOSE_DBSTRING" status
+```
+
+```bash Create new migration
+goose -dir migrations create add_column_to_urls sql
+```
+
+</CodeGroup>
+
+### Migration file structure
+
+Migrations follow the Goose format with `-- +goose Up` and `-- +goose Down` directives:
+
+```sql
+-- +goose Up
+-- +goose StatementBegin
+CREATE TABLE example (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL
+);
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+DROP TABLE example;
+-- +goose StatementEnd
+```
+
+<Warning>
+Always include a `Down` migration to allow rollbacks. Test both directions before deploying to production.
+</Warning>
+
+## TimescaleDB features
+
+TimescaleDB provides powerful time-series capabilities:
+
+### Automatic partitioning
+
+Hypertables are automatically partitioned by time for optimal query performance:
+
+```sql
+-- Query recent data (uses recent chunks only)
+SELECT * FROM url_statuses
+WHERE time > NOW() - INTERVAL '1 hour'
+AND url_id = 42;
+
+-- Aggregate historical data
+SELECT time_bucket('1 hour', time) AS hour,
+       COUNT(*) as checks,
+       COUNT(*) FILTER (WHERE status = true) as successful
+FROM url_statuses
+WHERE url_id = 42
+AND time > NOW() - INTERVAL '7 days'
+GROUP BY hour
+ORDER BY hour DESC;
+```
+
+### Data retention policies
+
+Automatically drop old data to manage storage:
+
+```sql
+-- Drop data older than 90 days
+SELECT add_retention_policy('url_statuses', INTERVAL '90 days');
+
+-- Drop old incidents after 1 year
+SELECT add_retention_policy('incidents', INTERVAL '1 year');
+```
+
+### Continuous aggregates
+
+Pre-compute aggregations for fast queries:
+
+```sql
+-- Create hourly aggregates
+CREATE MATERIALIZED VIEW url_statuses_hourly
+WITH (timescaledb.continuous) AS
+SELECT time_bucket('1 hour', time) AS hour,
+       url_id,
+       COUNT(*) as total_checks,
+       COUNT(*) FILTER (WHERE status = true) as successful_checks,
+       AVG(CASE WHEN status = true THEN 1 ELSE 0 END) as uptime_percentage
+FROM url_statuses
+GROUP BY hour, url_id;
+
+-- Refresh policy
+SELECT add_continuous_aggregate_policy('url_statuses_hourly',
+    start_offset => INTERVAL '3 hours',
+    end_offset => INTERVAL '1 hour',
+    schedule_interval => INTERVAL '1 hour');
+```
+
+<Note>
+Continuous aggregates are optional but highly recommended for large-scale deployments with many monitored URLs.
+</Note>
+
+## Troubleshooting
+
+<Accordion title="Connection refused errors">
+
+**Symptoms**: `pgxpool connection failed: connection refused`
+
+**Solutions**:
+1. Verify PostgreSQL is running: `sudo systemctl status postgresql`
+2. Check PostgreSQL is listening on the correct port: `sudo netstat -tlnp | grep 5432`
+3. Verify `pg_hba.conf` allows connections from your host
+4. Check firewall rules allow port 5432
+
+</Accordion>
+
+<Accordion title="TimescaleDB extension not found">
+
+**Symptoms**: `ERROR: extension "timescaledb" is not available`
+
+**Solutions**:
+1. Install TimescaleDB extension package
+2. Run `timescaledb-tune` to configure PostgreSQL
+3. Add `shared_preload_libraries = 'timescaledb'` to `postgresql.conf`
+4. Restart PostgreSQL: `sudo systemctl restart postgresql`
+
+</Accordion>
+
+<Accordion title="Migration failures">
+
+**Symptoms**: Goose migrations fail or leave database in inconsistent state
+
+**Solutions**:
+1. Check migration status: `goose status`
+2. Manually fix the database schema
+3. Update `goose_db_version` table to reflect actual state
+4. Re-run migrations: `goose up`
+
+For complete reset (development only):
+```bash
+goose down-to 0  # Rollback all
+goose up         # Re-apply all
+```
+
+</Accordion>
+
+<Accordion title="Connection pool exhaustion">
+
+**Symptoms**: `all pool connections are in use` errors under high load
+
+**Solutions**:
+1. Increase pool size in connection configuration
+2. Reduce `MAXIMUM_WORK_POOL_SIZE` to limit concurrency
+3. Check for connection leaks (connections not properly closed)
+4. Increase PostgreSQL `max_connections` setting
+
+</Accordion>
+
+## Performance optimization
+
+<Steps>
+
+<Step title="Create indexes">
+  Add indexes for common query patterns:
+  
+  ```sql
+  -- Index for URL lookups
+  CREATE INDEX idx_urls_status ON urls(status);
+  CREATE INDEX idx_urls_frequency ON urls(monitoring_frequency);
+  
+  -- Index for time-series queries
+  CREATE INDEX idx_url_statuses_url_id_time ON url_statuses(url_id, time DESC);
+  ```
+</Step>
+
+<Step title="Configure autovacuum">
+  Ensure autovacuum is enabled for table maintenance:
+  
+  ```sql
+  ALTER TABLE urls SET (autovacuum_vacuum_scale_factor = 0.1);
+  ```
+</Step>
+
+<Step title="Monitor query performance">
+  Use `EXPLAIN ANALYZE` to identify slow queries:
+  
+  ```sql
+  EXPLAIN ANALYZE
+  SELECT * FROM url_statuses
+  WHERE url_id = 42
+  AND time > NOW() - INTERVAL '1 day';
+  ```
+</Step>
+
+</Steps>

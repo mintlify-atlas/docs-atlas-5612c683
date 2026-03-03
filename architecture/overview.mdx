@@ -1,0 +1,136 @@
+---
+title: Architecture overview
+description: Learn about Watchdog's event-driven architecture and how components work together to monitor your URLs
+---
+
+Watchdog is built on an event-driven architecture that uses a worker pool pattern to efficiently monitor URLs at configurable intervals. The system is designed with separation of concerns, allowing workers to perform checks, a supervisor to make decisions, and listeners to handle persistence and notifications.
+
+## Architecture principles
+
+The architecture follows these core principles:
+
+- **Event-driven design**: Components communicate through domain events rather than direct coupling
+- **Worker pool pattern**: Multiple workers perform concurrent HTTP checks efficiently
+- **Separation of concerns**: Checking, decision-making, and side effects are handled by distinct components
+- **Scalability**: Worker pools can be configured to handle varying loads
+- **Time-series storage**: Historical metrics are stored in TimescaleDB for analysis
+
+## System overview
+
+The monitoring system consists of several key components working together:
+
+```
+Orchestrator
+    ↓
+    ├── Event Bus (with Listeners)
+    ├── Supervisor
+    └── ParentWorker (per interval)
+            ↓
+            └── ChildWorker (pool)
+                    ↓
+                    └── HTTP Checks → Supervisor → Event Bus → Listeners
+```
+
+<Note>
+  The orchestrator creates one `ParentWorker` for each configured monitoring interval (e.g., 10 seconds, 5 minutes, 1 hour). Each parent worker manages its own pool of child workers.
+</Note>
+
+## Runtime flow
+
+Here's how the system operates from startup to notification:
+
+1. **Initialization**: The orchestrator bootstraps the system by setting up the logger, event bus, and supervisor
+
+2. **Listener registration**: Event listeners subscribe to `ping.successful` and `ping.unsuccessful` events
+
+3. **Worker creation**: For each configured monitoring frequency, the orchestrator creates a `ParentWorker`
+
+4. **Worker spawning**: Each parent worker spawns multiple `ChildWorker` instances based on `MAXIMUM_CHILD_WORKERS`
+
+5. **Scheduled checks**: Workers perform periodic HTTP checks at their designated intervals
+
+6. **Result submission**: Child workers send raw check results to the supervisor
+
+7. **Decision logic**: The supervisor evaluates results and publishes domain events to the event bus
+
+8. **Event handling**: Registered listeners react to events by:
+   - Persisting time-series measurements to TimescaleDB
+   - Updating URL metadata in the database
+   - Triggering email notifications on state transitions
+
+<Info>
+  This separation ensures that workers focus solely on performing checks, while the supervisor handles business logic, and listeners manage side effects.
+</Info>
+
+## Configuration and intervals
+
+Watchdog supports eight monitoring frequencies, each running in its own worker group:
+
+| Frequency | Seconds | Use case |
+|-----------|---------|----------|
+| `ten_seconds` | 10 | Critical services requiring immediate alerts |
+| `thirty_seconds` | 30 | High-priority services |
+| `one_minute` | 60 | Important services |
+| `five_minutes` | 300 | Standard monitoring (default) |
+| `thirty_minutes` | 1800 | Low-priority or stable services |
+| `one_hour` | 3600 | Background checks |
+| `twelve_hours` | 43200 | Daily health checks |
+| `twenty_four_hours` | 86400 | Weekly or periodic verification |
+
+Each interval is defined in `enums/monitoring_frequency.go:18-38` and converted to seconds for internal scheduling.
+
+## Concurrency model
+
+The system uses Go's concurrency primitives for efficient operation:
+
+- **Goroutines**: Each parent worker runs in its own goroutine, as does each child worker
+- **Channels**: Used for signaling between orchestrator and parent workers, and between parent and child workers
+- **Wait groups**: Ensure graceful shutdown by tracking active workers
+- **Buffered channels**: The supervisor uses a buffered work pool for handling check results
+
+```go
+// From orchestrator/orchestrator.go:64-79
+for interval, parentWorker := range o.intervals {
+    ticker := time.NewTicker(time.Duration(interval) * time.Second)
+    o.waitGroup.Add(1)
+    go func() {
+        for {
+            select {
+            case <-ticker.C:
+                parentWorker.Signal <- true
+            case <-o.ctx.Done():
+                ticker.Stop()
+                o.waitGroup.Done()
+                return
+            }
+        }
+    }()
+}
+```
+
+## Data persistence
+
+Watchdog uses a dual-storage approach:
+
+### Redis (in-memory cache)
+- Stores URL IDs in lists organized by monitoring frequency
+- Caches full URL objects in hashes for fast worker access
+- Key format: `urls_interval_{seconds}` for lists, `urls_hash_interval_{seconds}` for hashes
+
+### PostgreSQL/TimescaleDB
+- **urls table**: Stores metadata for each monitored URL
+- **url_statuses hypertable**: Time-series data for historical metrics
+- **incidents table**: Tracks downtime incidents and resolutions
+
+The combination allows workers to quickly fetch URLs from Redis while maintaining durable historical data in PostgreSQL.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Component details" icon="cubes" href="./components">
+    Deep dive into each component's implementation
+  </Card>
+  <Card title="Event flow" icon="diagram-project" href="./event-flow">
+    Understand the complete data flow through the system
+  </Card>
+</CardGroup>

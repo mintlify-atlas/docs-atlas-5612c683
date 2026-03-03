@@ -1,0 +1,579 @@
+---
+title: Running the service
+description: Learn different ways to run Watchdog as a monitoring service
+---
+
+Watchdog can be run in several ways depending on your deployment needs. This guide covers running in development, building production binaries, and deployment considerations.
+
+## Running with go run
+
+The fastest way to start Watchdog during development is using `go run`.
+
+### Start the monitoring service
+
+```bash
+go run ./cmd/... guard
+```
+
+Or use the short alias:
+
+```bash
+go run ./cmd/... g
+```
+
+### What happens when you start the service
+
+<Steps>
+  <Step title="Environment initialization">
+    Watchdog loads configuration from environment variables (`.env` file):
+    - Database connection settings
+    - Redis connection settings
+    - Worker pool configuration
+    - SMTP settings for notifications
+  </Step>
+
+  <Step title="Database and Redis connections">
+    The service establishes connections:
+    ```
+    Connected to PostgreSQL database!
+    ```
+
+    Redis is pinged to verify connectivity. If either connection fails, the service will panic with an error message.
+  </Step>
+
+  <Step title="Orchestrator initialization">
+    The orchestrator bootstraps the monitoring system:
+    - Creates the event bus for pub/sub messaging
+    - Registers event listeners for persistence and notifications
+    - Instantiates the Supervisor for check evaluation
+    - Creates ParentWorker instances for each monitoring interval
+  </Step>
+
+  <Step title="Service is running">
+    ```
+    Watchdog is running
+    ```
+
+    The service now actively monitors all configured URLs according to their frequencies.
+  </Step>
+</Steps>
+
+### Development workflow
+
+```bash
+# Terminal 1: Run the service
+go run ./cmd/... guard
+
+# Terminal 2: Add URLs to monitor
+go run ./cmd/... add https://example.com get five_minutes admin@example.com
+
+# Terminal 3: List monitored URLs
+go run ./cmd/... list
+```
+
+<Note>
+When running with `go run`, the service will recompile each time you run it. For faster startup, consider building a binary (see below).
+</Note>
+
+## Building production binaries
+
+For production deployments, build a standalone binary instead of using `go run`.
+
+### Build the binary
+
+```bash
+go build -o watchdog ./cmd/...
+```
+
+This creates a `watchdog` binary in your current directory.
+
+### Build with optimizations
+
+For production, use build flags to optimize the binary:
+
+```bash
+# Remove debug information and reduce binary size
+go build -ldflags="-s -w" -o watchdog ./cmd/...
+```
+
+### Build for different platforms
+
+```bash
+# Build for Linux (amd64)
+GOOS=linux GOARCH=amd64 go build -o watchdog-linux ./cmd/...
+
+# Build for Linux (arm64)
+GOOS=linux GOARCH=arm64 go build -o watchdog-arm ./cmd/...
+
+# Build for macOS (Intel)
+GOOS=darwin GOARCH=amd64 go build -o watchdog-macos ./cmd/...
+
+# Build for macOS (Apple Silicon)
+GOOS=darwin GOARCH=arm64 go build -o watchdog-macos-arm ./cmd/...
+
+# Build for Windows
+GOOS=windows GOARCH=amd64 go build -o watchdog.exe ./cmd/...
+```
+
+### Running the binary
+
+Once built, run the binary directly:
+
+```bash
+# Start the service
+./watchdog guard
+
+# Add a URL
+./watchdog add https://example.com get five_minutes admin@example.com
+
+# List URLs
+./watchdog list
+
+# Remove a URL
+./watchdog remove 42
+```
+
+<Tip>
+Store the binary in `/usr/local/bin` or another directory in your `$PATH` to run it from anywhere:
+```bash
+sudo cp watchdog /usr/local/bin/
+watchdog guard
+```
+</Tip>
+
+## Running as a systemd service
+
+For production Linux deployments, run Watchdog as a systemd service for automatic restarts and proper lifecycle management.
+
+### Create a systemd service file
+
+Create `/etc/systemd/system/watchdog.service`:
+
+```ini
+[Unit]
+Description=Watchdog Uptime Monitoring Service
+After=network.target postgresql.service redis.service
+Wants=postgresql.service redis.service
+
+[Service]
+Type=simple
+User=watchdog
+Group=watchdog
+WorkingDirectory=/opt/watchdog
+EnvironmentFile=/opt/watchdog/.env
+ExecStart=/opt/watchdog/watchdog guard
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/watchdog
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Set up the service
+
+<Steps>
+  <Step title="Create a dedicated user">
+    ```bash
+    sudo useradd -r -s /bin/false watchdog
+    ```
+  </Step>
+
+  <Step title="Create application directory">
+    ```bash
+    sudo mkdir -p /opt/watchdog
+    sudo chown watchdog:watchdog /opt/watchdog
+    ```
+  </Step>
+
+  <Step title="Deploy the binary and configuration">
+    ```bash
+    sudo cp watchdog /opt/watchdog/
+    sudo cp .env /opt/watchdog/
+    sudo chown watchdog:watchdog /opt/watchdog/watchdog
+    sudo chown watchdog:watchdog /opt/watchdog/.env
+    sudo chmod 600 /opt/watchdog/.env
+    ```
+  </Step>
+
+  <Step title="Enable and start the service">
+    ```bash
+    # Reload systemd
+    sudo systemctl daemon-reload
+
+    # Enable service to start on boot
+    sudo systemctl enable watchdog
+
+    # Start the service
+    sudo systemctl start watchdog
+    ```
+  </Step>
+
+  <Step title="Verify the service is running">
+    ```bash
+    sudo systemctl status watchdog
+    ```
+
+    Expected output:
+    ```
+    ● watchdog.service - Watchdog Uptime Monitoring Service
+       Loaded: loaded (/etc/systemd/system/watchdog.service; enabled)
+       Active: active (running) since Mon 2026-03-03 10:00:00 UTC
+     Main PID: 12345 (watchdog)
+       Status: "Watchdog is running"
+    ```
+  </Step>
+</Steps>
+
+### Managing the systemd service
+
+```bash
+# Start the service
+sudo systemctl start watchdog
+
+# Stop the service
+sudo systemctl stop watchdog
+
+# Restart the service
+sudo systemctl restart watchdog
+
+# Check status
+sudo systemctl status watchdog
+
+# View logs
+sudo journalctl -u watchdog -f
+
+# View logs from the last hour
+sudo journalctl -u watchdog --since "1 hour ago"
+```
+
+## Running in Docker
+
+While the repository doesn't include a Dockerfile, you can create one for containerized deployments.
+
+### Create a Dockerfile
+
+Create `Dockerfile` in your project root:
+
+```dockerfile
+# Build stage
+FROM golang:1.21-alpine AS builder
+
+WORKDIR /app
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build binary
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o watchdog ./cmd/...
+
+# Runtime stage
+FROM alpine:latest
+
+RUN apk --no-cache add ca-certificates tzdata
+
+WORKDIR /app
+
+# Copy binary from builder
+COPY --from=builder /app/watchdog .
+
+# Create non-root user
+RUN addgroup -g 1000 watchdog && \
+    adduser -D -u 1000 -G watchdog watchdog && \
+    chown -R watchdog:watchdog /app
+
+USER watchdog
+
+CMD ["./watchdog", "guard"]
+```
+
+### Build the Docker image
+
+```bash
+docker build -t watchdog:latest .
+```
+
+### Run with Docker
+
+```bash
+docker run -d \
+  --name watchdog \
+  --env-file .env \
+  --restart unless-stopped \
+  watchdog:latest
+```
+
+### Run with docker-compose
+
+Create `docker-compose.yml`:
+
+```yaml
+version: '3.8'
+
+services:
+  postgres:
+    image: timescale/timescaledb:latest-pg14
+    environment:
+      POSTGRES_USER: tsdbadmin
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: tsdb
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  watchdog:
+    build: .
+    depends_on:
+      - postgres
+      - redis
+    env_file:
+      - .env
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+```
+
+Start all services:
+
+```bash
+docker-compose up -d
+```
+
+### Execute commands in Docker
+
+```bash
+# Add a URL
+docker exec watchdog ./watchdog add https://example.com get five_minutes admin@example.com
+
+# List URLs
+docker exec watchdog ./watchdog list
+
+# Remove a URL
+docker exec watchdog ./watchdog remove 42
+
+# View logs
+docker logs -f watchdog
+```
+
+## Environment configuration
+
+Before running Watchdog, configure your environment variables.
+
+### Create .env file
+
+Copy the example file:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` with your configuration:
+
+```bash
+# Application
+APP_ENV=production
+
+# Redis
+REDIS_HOST=127.0.0.1:6379
+REDIS_PASS=''
+REDIS_DB=2
+
+# Worker Configuration
+MAXIMUM_CHILD_WORKERS=5
+MAXIMUM_WORK_POOL_SIZE=25
+HTTP_REQUEST_TIMEOUT=5
+SUPERVISOR_POOL_FLUSH_TIMEOUT=5
+SUPERVISOR_POOL_FLUSH_BATCHSIZE=100
+
+# Database (TimescaleDB/Postgres)
+DB_USER=tsdbadmin
+DB_PASSWORD=your_secure_password
+DB_HOST=localhost
+DB_PORT=5432
+DB_DATABASE=tsdb
+
+# Goose Migration
+GOOSE_DRIVER=postgres
+GOOSE_DBSTRING="postgresql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_DATABASE}?sslmode=disable"
+GOOSE_MIGRATION_DIR=migrations
+
+# SMTP for Notifications
+MAIL_FROM_ADDRESS="watchdog@example.com"
+MAIL_HOST=smtp.example.com
+MAIL_PORT=587
+MAIL_USERNAME=your_smtp_username
+MAIL_PASSWORD=your_smtp_password
+```
+
+<Warning>
+Never commit your `.env` file to version control. It contains sensitive credentials. The `.env` file is already in `.gitignore`.
+</Warning>
+
+## Running database migrations
+
+Before first run, apply database migrations to create the required tables.
+
+### Install Goose
+
+```bash
+go install github.com/pressly/goose/v3/cmd/goose@latest
+```
+
+### Run migrations
+
+```bash
+# Navigate to migrations directory
+cd migrations
+
+# Run migrations
+goose postgres "postgresql://tsdbadmin:password@localhost:5432/tsdb?sslmode=disable" up
+```
+
+Or use environment variables:
+
+```bash
+export GOOSE_DRIVER=postgres
+export GOOSE_DBSTRING="postgresql://tsdbadmin:password@localhost:5432/tsdb?sslmode=disable"
+goose -dir migrations up
+```
+
+### Verify migrations
+
+```bash
+goose -dir migrations status
+```
+
+Expected output:
+```
+2025/11/15 11:21:01 Applied At                  Migration
+2025/11/15 11:21:01 =======================================
+2025/11/15 11:21:01 Mon Mar 03 10:00:00 2026 -- create_urls_table.sql
+2025/11/15 11:21:01 Mon Mar 03 10:00:01 2026 -- create_url_status_table.sql
+2025/11/15 11:21:01 Mon Mar 03 10:00:02 2026 -- create_incidents_table.sql
+```
+
+<Note>
+Ensure TimescaleDB extension is enabled in your database:
+```sql
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+```
+</Note>
+
+## Performance tuning
+
+### Worker configuration
+
+Adjust worker settings in `.env` based on your monitoring scale:
+
+```bash
+# Maximum child workers per parent worker
+MAXIMUM_CHILD_WORKERS=5
+
+# Total concurrent work pool size
+MAXIMUM_WORK_POOL_SIZE=25
+
+# HTTP request timeout (seconds)
+HTTP_REQUEST_TIMEOUT=5
+```
+
+<Tip>
+**Scaling guidelines:**
+- For 10-50 URLs: Default settings work well
+- For 50-200 URLs: Increase `MAXIMUM_WORK_POOL_SIZE` to 50
+- For 200+ URLs: Increase to 100+ and monitor resource usage
+</Tip>
+
+### Supervisor configuration
+
+```bash
+# Flush timeout for batch operations (seconds)
+SUPERVISOR_POOL_FLUSH_TIMEOUT=5
+
+# Batch size for supervisor flush operations
+SUPERVISOR_POOL_FLUSH_BATCHSIZE=100
+```
+
+## Health checks
+
+Monitor your Watchdog service health:
+
+### Check database connectivity
+
+```bash
+# From the application
+go run ./cmd/... guard
+# Look for: "Connected to PostgreSQL database!"
+```
+
+### Check Redis connectivity
+
+The service will panic if Redis is unavailable:
+```
+Redis connection failed
+panic: Redis connection failed
+```
+
+### Monitor logs
+
+Watchdog uses structured logging (`log/slog`):
+
+```bash
+# With systemd
+sudo journalctl -u watchdog -f
+
+# With Docker
+docker logs -f watchdog
+
+# Direct execution (logs to stdout)
+./watchdog guard
+```
+
+## Graceful shutdown
+
+### Stop the service
+
+```bash
+# With systemd
+sudo systemctl stop watchdog
+
+# With Docker
+docker stop watchdog
+
+# Direct execution
+# Press Ctrl+C
+```
+
+The service will complete in-flight checks before shutting down.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Monitor URLs" icon="binoculars" href="/guides/monitoring-urls">
+    Learn how to add and manage monitored URLs
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="/guides/troubleshooting">
+    Resolve common issues and errors
+  </Card>
+</CardGroup>

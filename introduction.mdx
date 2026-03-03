@@ -1,0 +1,124 @@
+---
+title: Introduction to Watchdog
+description: A powerful event-driven uptime monitoring service built with Go that keeps your URLs healthy and your team informed
+---
+
+<img
+  className="block dark:hidden"
+  src="/images/hero-light.svg"
+  alt="Watchdog Hero Light"
+/>
+<img
+  className="hidden dark:block"
+  src="/images/hero-dark.svg"
+  alt="Watchdog Hero Dark"
+/>
+
+## What is Watchdog?
+
+Watchdog is an event-driven uptime monitoring service that periodically checks configured URLs, writes time-series metrics to TimescaleDB/Postgres, and notifies owners when status changes occur. Built with Go, it provides a robust and scalable solution for monitoring your critical web services.
+
+The system uses a sophisticated worker-based architecture where child workers perform HTTP checks, a supervisor evaluates results and makes state decisions, and event listeners handle persistence and notifications—ensuring clean separation of concerns throughout the monitoring pipeline.
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card
+    title="Event-driven architecture"
+    icon="bolt"
+    iconType="duotone"
+  >
+    Built on a pub/sub event bus that decouples check execution from persistence and notifications, enabling flexible and maintainable monitoring workflows.
+  </Card>
+  <Card
+    title="Flexible monitoring intervals"
+    icon="clock"
+    iconType="duotone"
+  >
+    Monitor URLs at intervals from 10 seconds to 24 hours. Choose the frequency that matches your service's criticality and requirements.
+  </Card>
+  <Card
+    title="Time-series metrics"
+    icon="chart-line"
+    iconType="duotone"
+  >
+    Stores historical health and latency data in TimescaleDB hypertables, giving you powerful analytics and insights into your services over time.
+  </Card>
+  <Card
+    title="Instant notifications"
+    icon="envelope"
+    iconType="duotone"
+  >
+    Receive email alerts via SMTP when your monitored URLs change state, ensuring you're always aware of issues as they happen.
+  </Card>
+  <Card
+    title="Multiple HTTP methods"
+    icon="code"
+    iconType="duotone"
+  >
+    Monitor endpoints using GET, POST, PATCH, PUT, or DELETE methods to accurately test your API health.
+  </Card>
+  <Card
+    title="Simple CLI interface"
+    icon="terminal"
+    iconType="duotone"
+  >
+    Manage your monitored URLs with intuitive commands: add, remove, list, and analyze—all from your terminal.
+  </Card>
+</CardGroup>
+
+## How it works
+
+Watchdog's architecture is designed for reliability and scalability:
+
+<Steps>
+  <Step title="Orchestrator initialization">
+    The orchestrator bootstraps the system by setting up the logger, event bus, and supervisor. It then registers event listeners and creates parent worker groups for each monitoring interval.
+  </Step>
+  
+  <Step title="Worker execution">
+    Parent workers spawn child workers that perform the actual HTTP checks. Each child worker makes requests to assigned URLs based on the configured interval and forwards raw results to the supervisor.
+  </Step>
+  
+  <Step title="Supervisor evaluation">
+    The supervisor receives check results and applies decision logic (thresholds, debounce) to determine if a check represents success or failure, then publishes domain events like `ping.successful` or `ping.unsuccessful` to the event bus.
+  </Step>
+  
+  <Step title="Event handling">
+    Event listeners react to published events by persisting time-series data points to TimescaleDB, updating URL metadata when state changes occur, and sending notification emails to configured contacts.
+  </Step>
+</Steps>
+
+<Note>
+  The event-driven design ensures that workers focus solely on performing checks, while the supervisor handles state management, and listeners manage side effects. This separation of concerns makes the system maintainable and extensible.
+</Note>
+
+## Tech stack
+
+Watchdog is built with modern, production-ready technologies:
+
+- **Go 1.24** - Fast, concurrent, and reliable
+- **PostgreSQL with TimescaleDB** - Time-series data storage via `pgx/v5`
+- **Redis** - Internal caching and work distribution
+- **Goose** - Database migration management
+- **SMTP** - Email notifications (Mailtrap, SendGrid, etc.)
+- **Structured logging** - Built-in `log/slog` for observability
+
+## Get started
+
+<CardGroup cols={2}>
+  <Card
+    title="Quick start"
+    icon="rocket"
+    href="/quickstart"
+  >
+    Get Watchdog up and running in minutes with our step-by-step guide
+  </Card>
+  <Card
+    title="CLI reference"
+    icon="book"
+    href="/cli/overview"
+  >
+    Explore all available commands and their options
+  </Card>
+</CardGroup>

@@ -1,0 +1,181 @@
+---
+title: remove command
+description: Remove a URL from the Watchdog monitoring system
+---
+
+## Overview
+
+The `remove` command deletes a monitored URL from the system by its ID. This stops all monitoring and alerting for that URL.
+
+## Usage
+
+```bash
+watchdog remove <id>
+```
+
+## Aliases
+
+- `rm`
+
+## Description
+
+The `remove` command permanently deletes a URL from monitoring. It removes the entry from the database and cleans up all associated data in Redis. Once removed, the URL will no longer be checked and no alerts will be sent.
+
+## Arguments
+
+<ParamField path="id" type="integer" required>
+  The unique identifier of the URL to remove. You can find this ID using the `list` command.
+</ParamField>
+
+## Flags
+
+This command has no flags.
+
+## Examples
+
+### Remove a URL by ID
+
+```bash
+watchdog remove 123
+```
+
+Expected output:
+
+```
+Connected to PostgreSQL database!
+URL successfully removing, ID: 123
+```
+
+### Using the short alias
+
+```bash
+watchdog rm 123
+```
+
+### Find ID and remove
+
+First, list all URLs to find the ID:
+
+```bash
+watchdog list
+```
+
+Then remove the URL:
+
+```bash
+watchdog remove 5
+```
+
+## Validation
+
+The command performs the following validations:
+
+1. **ID required**: The ID argument must be provided and greater than 0
+2. **URL exists**: The URL with the specified ID must exist in the database
+3. **Database connection**: Must successfully connect to PostgreSQL
+4. **Redis connection**: Must successfully connect to Redis
+
+<Warning>
+The remove operation is permanent and cannot be undone. If you remove a URL by mistake, you'll need to add it again using the `add` command.
+</Warning>
+
+## Error handling
+
+### Missing ID argument
+
+```bash
+watchdog remove
+```
+
+Error output:
+```
+ID is required
+```
+
+### Invalid ID (0 or negative)
+
+```bash
+watchdog remove 0
+```
+
+Error output:
+```
+ID is required
+```
+
+### URL not found
+
+```bash
+watchdog remove 999
+```
+
+Error output:
+```
+Error removing url: no rows in result set
+```
+
+### Database connection failed
+
+If PostgreSQL is not accessible:
+
+```
+pgxpool connection failed: connection refused
+```
+
+Solution: Verify PostgreSQL is running and credentials in `.env` are correct.
+
+## What happens when you remove a URL?
+
+1. The URL entry is deleted from the PostgreSQL database
+2. The URL is removed from its Redis monitoring queue
+3. All historical monitoring data for that URL is preserved (status checks, incidents)
+4. The Redis interval cache is refreshed to reflect the removal
+5. No further health checks or alerts will be sent
+
+<Note>
+Removing a URL does not delete historical data like past incidents or status checks. This data remains in the database for historical analysis.
+</Note>
+
+## Technical details
+
+- The command first retrieves the URL to determine its monitoring frequency
+- It then deletes the database entry
+- Finally, it refreshes the Redis cache for that frequency interval
+- This ensures the monitoring loop no longer attempts to check the removed URL
+
+## Common use cases
+
+### Decommissioned service
+
+When a service is retired:
+
+```bash
+watchdog list --status=healthy
+watchdog remove 42
+```
+
+### Duplicate entry
+
+If you accidentally added a URL twice:
+
+```bash
+watchdog list
+# Find the duplicate ID
+watchdog remove 15
+```
+
+### Testing cleanup
+
+After testing, remove test URLs:
+
+```bash
+watchdog remove 100
+watchdog remove 101
+watchdog remove 102
+```
+
+## See also
+
+- [add command](/cli/add) - Add a new URL to monitor
+- [list command](/cli/list) - View all monitored URLs and their IDs
+- [analysis command](/cli/analysis) - View statistics before removing

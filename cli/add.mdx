@@ -1,0 +1,173 @@
+---
+title: add command
+description: Add a new URL to the Watchdog monitoring system
+---
+
+## Overview
+
+The `add` command registers a new URL for monitoring. You specify the URL, HTTP method, monitoring frequency, and a contact email for alerts.
+
+## Usage
+
+```bash
+watchdog add <url> <http_method> <frequency> <contact_email>
+```
+
+## Aliases
+
+- `a`
+
+## Description
+
+The `add` command creates a new monitoring entry in the database and registers it with Redis for periodic health checks. When the URL becomes unreachable, alerts will be sent to the specified contact email.
+
+## Arguments
+
+<ParamField path="url" type="string" required>
+  The full URL to monitor (e.g., `https://example.com`)
+</ParamField>
+
+<ParamField path="http_method" type="string" default="get">
+  The HTTP method to use when checking the URL.
+  
+  Valid values:
+  - `get`
+  - `post`
+  - `put`
+  - `patch`
+  - `delete`
+</ParamField>
+
+<ParamField path="frequency" type="string" default="five_minutes">
+  How often to check the URL.
+  
+  Valid values:
+  - `ten_seconds` - Check every 10 seconds
+  - `thirty_seconds` - Check every 30 seconds
+  - `one_minute` - Check every minute
+  - `five_minutes` - Check every 5 minutes
+  - `thirty_minutes` - Check every 30 minutes
+  - `one_hour` - Check every hour
+  - `twelve_hours` - Check every 12 hours
+  - `twenty_four_hours` - Check every 24 hours
+</ParamField>
+
+<ParamField path="contact_email" type="string" required>
+  Email address to receive alerts when the URL is unreachable
+</ParamField>
+
+## Flags
+
+This command has no flags.
+
+## Examples
+
+### Add a URL with default settings
+
+```bash
+watchdog add https://example.com get five_minutes admin@example.com
+```
+
+Expected output:
+
+```
+Connected to PostgreSQL database!
+URL successfully added, ID: 1
+```
+
+### Monitor an API endpoint with POST requests
+
+```bash
+watchdog add https://api.example.com/health post one_minute ops@example.com
+```
+
+### Monitor a critical service every 10 seconds
+
+```bash
+watchdog add https://critical-service.com get ten_seconds oncall@example.com
+```
+
+### Using the short alias
+
+```bash
+watchdog a https://example.com get five_minutes admin@example.com
+```
+
+## Response
+
+<ResponseField name="id" type="integer">
+  The unique identifier assigned to the newly added URL. Use this ID with other commands like `remove` and `analysis`.
+</ResponseField>
+
+## Validation
+
+The command performs the following validations:
+
+1. **Required fields**: Both `url` and `contact_email` must be provided
+2. **HTTP method**: Must be one of: get, post, put, patch, delete
+3. **Frequency**: Must be one of the supported monitoring frequencies
+4. **Database connection**: Must successfully connect to PostgreSQL
+5. **Redis connection**: Must successfully connect to Redis
+
+<Note>
+If `http_method` is not provided, it defaults to `get`. If `frequency` is not provided, it defaults to `five_minutes`.
+</Note>
+
+## Error handling
+
+### Missing required argument
+
+```bash
+watchdog add https://example.com get five_minutes
+```
+
+Error output:
+```
+contact_email is required
+```
+
+### Invalid HTTP method
+
+```bash
+watchdog add https://example.com head five_minutes admin@example.com
+```
+
+Error output:
+```
+Error parsing http method: invalid http method: head
+```
+
+### Invalid frequency
+
+```bash
+watchdog add https://example.com get two_minutes admin@example.com
+```
+
+Error output:
+```
+Error parsing frequency: invalid monitoring frequency: two_minutes
+```
+
+## What happens after adding a URL?
+
+1. The URL is stored in the PostgreSQL database
+2. The URL is added to the appropriate Redis queue based on its frequency
+3. If the `guard` command is running, the URL will be monitored at the next interval
+4. The initial status is set to "pending" until the first check completes
+
+<Warning>
+After adding a URL, make sure the `guard` command is running to begin monitoring. The URL will not be checked until the monitoring service is active.
+</Warning>
+
+## Technical details
+
+- The command automatically refreshes the Redis interval cache after adding the URL
+- URLs are stored with metadata including creation timestamp
+- The system uses a job queue pattern for efficient monitoring at scale
+
+## See also
+
+- [guard command](/cli/guard) - Start monitoring
+- [list command](/cli/list) - View all monitored URLs
+- [remove command](/cli/remove) - Remove a URL from monitoring
+- [analysis command](/cli/analysis) - View URL statistics

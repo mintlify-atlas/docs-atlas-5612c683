@@ -1,0 +1,307 @@
+---
+title: Environment variables
+description: Complete reference for all environment variables used to configure Watchdog
+---
+
+Watchdog uses environment variables for configuration. Copy `.env.example` to `.env` and configure the variables below for your environment.
+
+## Loading environment variables
+
+Watchdog uses the `godotenv` package to load environment variables from a `.env` file at startup. The `env` package provides helper functions to fetch typed values:
+
+<CodeGroup>
+
+```go env/env.go
+func FetchString(key string, fallback ...string) string {
+	response, ok := os.LookupEnv(key)
+	if ok {
+		return response
+	}
+	if len(fallback) > 0 {
+		return fallback[0]
+	}
+	panic(fmt.Sprintf("environment variable %s is not set and no fallback provided", key))
+}
+
+func FetchInt(key string, fallback ...int) int {
+	response, ok := os.LookupEnv(key)
+	if ok == false && len(fallback) <= 0 {
+		panic(fmt.Sprintf("environment variable %s is not set and no fallback provided", key))
+	}
+	resp, err := strconv.Atoi(response)
+	if err != nil {
+		if len(fallback) > 0 {
+			return fallback[0]
+		}
+		panic(fmt.Sprintf("environment variable %s is not an integer", key))
+	}
+	return resp
+}
+```
+
+</CodeGroup>
+
+<Note>
+If a required environment variable is missing and no fallback is provided, the application will panic at startup with a clear error message.
+</Note>
+
+## Application environment
+
+<ParamField path="APP_ENV" type="string" default="dev" required>
+  Application environment identifier. Controls environment-specific behavior and logging.
+  
+  Common values:
+  - `dev` - Development environment
+  - `staging` - Staging environment  
+  - `prod` - Production environment
+</ParamField>
+
+## Redis configuration
+
+Watchdog uses Redis for interval list caching and worker coordination.
+
+<ParamField path="REDIS_HOST" type="string" default="127.0.0.1:6379" required>
+  Redis server host and port in the format `host:port`.
+  
+  Example: `127.0.0.1:6379` or `redis.example.com:6379`
+</ParamField>
+
+<ParamField path="REDIS_PASS" type="string" default="''">
+  Redis server password. Leave empty if Redis doesn't require authentication.
+  
+  <Warning>
+  Always use authentication in production environments.
+  </Warning>
+</ParamField>
+
+<ParamField path="REDIS_DB" type="integer" default="2" required>
+  Redis database index (0-15). Allows isolating Watchdog data from other applications.
+  
+  Example: `2`
+</ParamField>
+
+## Worker and pool configuration
+
+These settings control the concurrency and performance characteristics of the monitoring system.
+
+<ParamField path="MAXIMUM_CHILD_WORKERS" type="integer" default="5" required>
+  Maximum number of child workers spawned per parent worker group.
+  
+  Each child worker performs actual HTTP checks. Higher values increase concurrency but consume more resources.
+  
+  Recommended range: `3-10` depending on server capacity
+</ParamField>
+
+<ParamField path="MAXIMUM_WORK_POOL_SIZE" type="integer" default="25" required>
+  Total work pool size controlling how many URLs are processed concurrently per batch.
+  
+  This value determines the batch size when processing URLs at each monitoring interval.
+  
+  Recommended range: `20-100` depending on server capacity and target count
+</ParamField>
+
+<ParamField path="HTTP_REQUEST_TIMEOUT" type="integer" default="5" required>
+  Timeout in seconds for HTTP requests performed by child workers.
+  
+  If a monitored URL doesn't respond within this timeframe, the check is marked as failed.
+  
+  Recommended range: `5-30` seconds
+</ParamField>
+
+<ParamField path="SUPERVISOR_POOL_FLUSH_TIMEOUT" type="integer" default="5" required>
+  Timeout in seconds for supervisor batch flushing operations.
+  
+  The supervisor batches check results before processing. This controls how long to wait before flushing accumulated results.
+  
+  Recommended range: `3-10` seconds
+</ParamField>
+
+<ParamField path="SUPERVISOR_POOL_FLUSH_BATCHSIZE" type="integer" default="100" required>
+  Batch size for supervisor flush operations.
+  
+  The supervisor processes check results in batches to improve efficiency. Higher values reduce overhead but increase memory usage.
+  
+  Recommended range: `50-200`
+</ParamField>
+
+## Database configuration
+
+See [Database configuration](/configuration/database) for detailed PostgreSQL/TimescaleDB setup.
+
+<ParamField path="DB_USER" type="string" default="tsdbadmin" required>
+  PostgreSQL username for database connections.
+  
+  Example: `tsdbadmin` or `watchdog_user`
+</ParamField>
+
+<ParamField path="DB_PASSWORD" type="string" required>
+  PostgreSQL password for the database user.
+  
+  <Warning>
+  Never commit this value to version control. Use environment-specific `.env` files that are gitignored.
+  </Warning>
+</ParamField>
+
+<ParamField path="DB_HOST" type="string" required>
+  PostgreSQL server hostname or IP address.
+  
+  Examples:
+  - `localhost` - Local database
+  - `postgres.example.com` - Remote database
+  - `10.0.1.5` - IP address
+</ParamField>
+
+<ParamField path="DB_PORT" type="string" required>
+  PostgreSQL server port number.
+  
+  Default PostgreSQL port is `5432`.
+</ParamField>
+
+<ParamField path="DB_DATABASE" type="string" default="tsdb" required>
+  PostgreSQL database name.
+  
+  This database must exist and have the TimescaleDB extension installed.
+</ParamField>
+
+## Migration configuration
+
+Watchdog uses [Goose](https://github.com/pressly/goose) for database migrations.
+
+<ParamField path="GOOSE_DRIVER" type="string" default="postgres" required>
+  Goose database driver name.
+  
+  For PostgreSQL/TimescaleDB, use `postgres`.
+</ParamField>
+
+<ParamField path="GOOSE_DBSTRING" type="string" required>
+  Database connection string used by Goose for migrations.
+  
+  Typically interpolates the `DB_*` variables:
+  
+  ```bash
+  GOOSE_DBSTRING="postgresql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_DATABASE}?sslmode=disable"
+  ```
+  
+  <Note>
+  For production, replace `sslmode=disable` with `sslmode=require` to enforce SSL/TLS connections.
+  </Note>
+</ParamField>
+
+<ParamField path="GOOSE_MIGRATION_DIR" type="string" default="migrations" required>
+  Path to the directory containing migration files.
+  
+  Relative to the project root. Default is `migrations`.
+</ParamField>
+
+## Email configuration
+
+See [Email configuration](/configuration/email) for detailed SMTP setup.
+
+<ParamField path="MAIL_FROM_ADDRESS" type="string" default="bruno@watchdog.com" required>
+  Sender email address used for notification emails.
+  
+  This address appears in the "From" field of status change notifications.
+  
+  Example: `notifications@watchdog.com`
+</ParamField>
+
+<ParamField path="MAIL_HOST" type="string" default="sandbox.smtp.mailtrap.io" required>
+  SMTP server hostname.
+  
+  Examples:
+  - `sandbox.smtp.mailtrap.io` - Mailtrap (development)
+  - `smtp.gmail.com` - Gmail
+  - `smtp.sendgrid.net` - SendGrid
+</ParamField>
+
+<ParamField path="MAIL_PORT" type="integer" default="2525" required>
+  SMTP server port number.
+  
+  Common ports:
+  - `25` - Standard SMTP (often blocked by ISPs)
+  - `587` - SMTP with STARTTLS (recommended)
+  - `465` - SMTP over SSL
+  - `2525` - Alternative port (Mailtrap)
+</ParamField>
+
+<ParamField path="MAIL_USERNAME" type="string" required>
+  SMTP authentication username.
+  
+  Required by most SMTP providers for authentication.
+</ParamField>
+
+<ParamField path="MAIL_PASSWORD" type="string" required>
+  SMTP authentication password or API key.
+  
+  <Warning>
+  Never commit this value to version control. Some providers (like Gmail) require app-specific passwords instead of account passwords.
+  </Warning>
+</ParamField>
+
+## Example configuration
+
+<Accordion title="Complete .env.example file">
+
+```bash .env.example
+APP_ENV=dev
+
+REDIS_HOST=127.0.0.1:6379
+REDIS_PASS=''
+REDIS_DB=2
+
+MAXIMUM_CHILD_WORKERS=5
+MAXIMUM_WORK_POOL_SIZE=25
+
+HTTP_REQUEST_TIMEOUT=5
+
+SUPERVISOR_POOL_FLUSH_TIMEOUT=5
+SUPERVISOR_POOL_FLUSH_BATCHSIZE=100
+
+DB_USER=tsdbadmin
+DB_PASSWORD=
+DB_HOST=
+DB_PORT=
+DB_DATABASE=tsdb
+
+GOOSE_DRIVER=postgres
+GOOSE_DBSTRING="postgresql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_DATABASE}?sslmode=disable"
+GOOSE_MIGRATION_DIR=migrations
+
+MAIL_FROM_ADDRESS="bruno@watchdog.com"
+MAIL_HOST=sandbox.smtp.mailtrap.io
+MAIL_PORT=2525
+MAIL_USERNAME=
+MAIL_PASSWORD=
+```
+
+</Accordion>
+
+## Validation and error handling
+
+Watchdog validates required environment variables at startup:
+
+<Steps>
+
+<Step title="Load .env file">
+  The application attempts to load environment variables from the `.env` file using `godotenv.Load()`.
+  
+  If the file is missing, the application will panic with "Error loading file".
+</Step>
+
+<Step title="Fetch required variables">
+  Each required variable is fetched using `env.FetchString()` or `env.FetchInt()`.
+  
+  If a required variable is missing and no fallback is provided, the application panics with the variable name.
+</Step>
+
+<Step title="Type validation">
+  Integer variables are validated using `strconv.Atoi()`.
+  
+  If a variable contains a non-integer value, the application panics with "environment variable X is not an integer".
+</Step>
+
+</Steps>
+
+<Note>
+The panic-on-error approach ensures that configuration issues are caught immediately at startup rather than causing runtime failures.
+</Note>

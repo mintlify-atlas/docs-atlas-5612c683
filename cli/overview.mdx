@@ -1,0 +1,108 @@
+---
+title: CLI overview
+description: Learn how to use the Watchdog command-line interface to monitor and manage your URLs
+---
+
+## Introduction
+
+Watchdog provides a powerful command-line interface (CLI) for monitoring HTTP endpoints. The CLI allows you to add URLs for monitoring, view their status, analyze uptime metrics, and manage your monitoring configuration.
+
+## Installation
+
+The Watchdog CLI is the main entry point for the application. After building the project, you can run commands using:
+
+```bash
+./watchdog [command] [arguments] [flags]
+```
+
+## Available commands
+
+Watchdog provides the following commands:
+
+- **guard** (g) - Start the monitoring process
+- **add** (a) - Add a URL to monitor
+- **remove** (rm) - Remove a URL from monitoring
+- **list** (ls) - List all monitored URLs
+- **analysis** (an) - View detailed analytics for a monitored URL
+
+## Getting help
+
+To see all available commands:
+
+```bash
+./watchdog --help
+```
+
+To see help for a specific command:
+
+```bash
+./watchdog [command] --help
+```
+
+## Command aliases
+
+Most commands have short aliases to speed up your workflow:
+
+- `guard` → `g`
+- `add` → `a`
+- `remove` → `rm`
+- `list` → `ls`
+- `analysis` → `an`
+
+## Common usage patterns
+
+### Starting the monitoring service
+
+Start Watchdog to begin monitoring all configured URLs:
+
+```bash
+./watchdog guard
+```
+
+### Adding and managing URLs
+
+Add a new URL to monitor:
+
+```bash
+./watchdog add https://example.com get five_minutes admin@example.com
+```
+
+List all monitored URLs:
+
+```bash
+./watchdog list
+```
+
+Remove a URL by its ID:
+
+```bash
+./watchdog remove 123
+```
+
+### Viewing analytics
+
+Get detailed uptime and incident statistics:
+
+```bash
+./watchdog analysis 123
+```
+
+## Configuration requirements
+
+Before running any commands, ensure you have a `.env` file in the same directory with the following configuration:
+
+- Database connection (PostgreSQL)
+- Redis connection
+- Email settings (for alerts)
+
+The CLI will automatically load environment variables from the `.env` file on startup.
+
+## Next steps
+
+Explore the detailed documentation for each command:
+
+- [guard command](/cli/guard) - Start the monitoring process
+- [add command](/cli/add) - Add URLs to monitor
+- [remove command](/cli/remove) - Remove URLs from monitoring
+- [list command](/cli/list) - View all monitored URLs
+- [analysis command](/cli/analysis) - View detailed analytics

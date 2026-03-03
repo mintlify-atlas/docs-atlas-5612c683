@@ -1,0 +1,310 @@
+---
+title: list command
+description: View all URLs being monitored by Watchdog with filtering and pagination
+---
+
+## Overview
+
+The `list` command displays all URLs currently being monitored by Watchdog. It supports pagination and filtering by HTTP method, frequency, and status.
+
+## Usage
+
+```bash
+watchdog list [flags]
+```
+
+## Aliases
+
+- `ls`
+
+## Description
+
+The `list` command retrieves and displays all monitored URLs with their current status, configuration, and contact information. Results are paginated and can be filtered to help you find specific URLs.
+
+## Arguments
+
+This command takes no arguments.
+
+## Flags
+
+<ParamField path="--page" type="integer" default={1}>
+  The page number to display. Use this to navigate through multiple pages of results.
+</ParamField>
+
+<ParamField path="--per_page" type="integer" default={20}>
+  The number of results to display per page.
+</ParamField>
+
+<ParamField path="--http_method" type="string" default="">
+  Filter results by HTTP method.
+  
+  Valid values:
+  - `get`
+  - `post`
+  - `put`
+  - `patch`
+  - `delete`
+</ParamField>
+
+<ParamField path="--frequency" type="string" default="">
+  Filter results by monitoring frequency.
+  
+  Valid values:
+  - `ten_seconds`
+  - `thirty_seconds`
+  - `one_minute`
+  - `five_minutes`
+  - `thirty_minutes`
+  - `one_hour`
+  - `twelve_hours`
+  - `twenty_four_hours`
+</ParamField>
+
+<ParamField path="--status" type="string" default="">
+  Filter results by current health status.
+  
+  Valid values:
+  - `healthy` - URL is reachable
+  - `unhealthy` - URL is unreachable
+  - `pending` - Not yet checked
+</ParamField>
+
+## Examples
+
+### List all monitored URLs
+
+```bash
+watchdog list
+```
+
+Expected output:
+
+```
+Connected to PostgreSQL database!
+Page 1 (showing 3 results)
+------------------------------------------------------------
+1. https://example.com
+   ID: 1 | Method: get | Status: healthy | Frequency: five_minutes
+   Contact: admin@example.com
+
+2. https://api.example.com/health
+   ID: 2 | Method: post | Status: healthy | Frequency: one_minute
+   Contact: ops@example.com
+
+3. https://critical-service.com
+   ID: 3 | Method: get | Status: unhealthy | Frequency: ten_seconds
+   Contact: oncall@example.com
+
+------------------------------------------------------------
+✓ End of results
+```
+
+### Navigate to a specific page
+
+```bash
+watchdog list --page=2
+```
+
+Expected output:
+
+```
+Page 2 (showing 20 results)
+← Previous: --page=1 | → Next: --page=3
+------------------------------------------------------------
+...
+```
+
+### Filter by status
+
+```bash
+watchdog list --status=unhealthy
+```
+
+Shows only URLs that are currently down.
+
+### Filter by HTTP method
+
+```bash
+watchdog list --http_method=post
+```
+
+Shows only URLs monitored with POST requests.
+
+### Filter by frequency
+
+```bash
+watchdog list --frequency=ten_seconds
+```
+
+Shows only URLs checked every 10 seconds.
+
+### Combine multiple filters
+
+```bash
+watchdog list --status=healthy --frequency=five_minutes --per_page=50
+```
+
+Shows healthy URLs checked every 5 minutes, with 50 results per page.
+
+### Using the short alias
+
+```bash
+watchdog ls --status=unhealthy
+```
+
+## Output format
+
+For each URL, the list command displays:
+
+<ResponseField name="Position number" type="integer">
+  The sequential number in the list (accounts for pagination offset)
+</ResponseField>
+
+<ResponseField name="URL" type="string">
+  The full URL being monitored
+</ResponseField>
+
+<ResponseField name="ID" type="integer">
+  The unique identifier (use with `remove` and `analysis` commands)
+</ResponseField>
+
+<ResponseField name="Method" type="string">
+  The HTTP method used for health checks
+</ResponseField>
+
+<ResponseField name="Status" type="string">
+  Current health status: healthy, unhealthy, or pending
+</ResponseField>
+
+<ResponseField name="Frequency" type="string">
+  How often the URL is checked
+</ResponseField>
+
+<ResponseField name="Contact" type="string">
+  Email address for alerts
+</ResponseField>
+
+## Pagination
+
+When there are more results than fit on one page:
+
+- The output shows "← Previous" and "→ Next" navigation hints
+- Use `--page=N` to navigate to a specific page
+- Adjust `--per_page` to control how many results appear per page
+
+<Note>
+Page numbers start at 1. Using `--page=0` or a negative number will result in an error.
+</Note>
+
+## Error handling
+
+### Invalid page number
+
+```bash
+watchdog list --page=0
+```
+
+Error output:
+```
+page must be greater than 0
+```
+
+### Invalid per_page number
+
+```bash
+watchdog list --per_page=-5
+```
+
+Error output:
+```
+per_page must be greater than 0
+```
+
+### Invalid HTTP method filter
+
+```bash
+watchdog list --http_method=head
+```
+
+Error output:
+```
+failed to fetch URLs: invalid http method: head
+```
+
+### Invalid frequency filter
+
+```bash
+watchdog list --frequency=two_minutes
+```
+
+Error output:
+```
+failed to fetch URLs: invalid monitoring frequency: two_minutes
+```
+
+### Invalid status filter
+
+```bash
+watchdog list --status=unknown
+```
+
+Error output:
+```
+failed to fetch URLs: invalid site health option: unknown
+```
+
+### No URLs found
+
+If no URLs match your filters:
+
+```
+No URLs found
+```
+
+## Common use cases
+
+### Check for unhealthy services
+
+```bash
+watchdog list --status=unhealthy
+```
+
+Quickly identify all services that are currently down.
+
+### Review high-frequency monitors
+
+```bash
+watchdog list --frequency=ten_seconds
+```
+
+See which services are being monitored most frequently.
+
+### Find a URL by method
+
+```bash
+watchdog list --http_method=post --per_page=100
+```
+
+List all POST endpoints being monitored.
+
+### Export list with large page size
+
+```bash
+watchdog list --per_page=1000 > monitored-urls.txt
+```
+
+Get all URLs in a single page for documentation.
+
+## Technical details
+
+- Pagination uses offset-based queries
+- The command fetches `per_page + 1` results to determine if more pages exist
+- Filters are applied at the database level for efficiency
+- Results maintain consistent ordering across pages
+
+## See also
+
+- [add command](/cli/add) - Add new URLs to monitor
+- [remove command](/cli/remove) - Remove URLs by their ID
+- [analysis command](/cli/analysis) - View detailed statistics for a URL
+- [guard command](/cli/guard) - Start the monitoring service
